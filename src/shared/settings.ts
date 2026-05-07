@@ -27,11 +27,16 @@ export const SettingsSchema = z.object({
     language: WhisperLanguageSchema,
     device: WhisperDeviceSchema,
   }),
-  shorts: z.object({
-    defaultCount: z.number().int().min(1).max(10),
-    minSec: z.number().int().min(5).max(180),
-    maxSec: z.number().int().min(5).max(180),
-  }),
+  shorts: z
+    .object({
+      defaultCount: z.number().int().min(1).max(10),
+      minSec: z.number().int().min(5).max(180),
+      maxSec: z.number().int().min(5).max(180),
+    })
+    .refine((v) => v.minSec <= v.maxSec, {
+      message: 'minSec must be ≤ maxSec',
+      path: ['minSec'],
+    }),
   subtitles: z.object({
     enabled: z.boolean(),
     fontFamily: z.string().min(1),
