@@ -18,6 +18,7 @@ let settingsStore: SettingsStore;
 let secureStorage: SecureStorage;
 let youtubeService: YouTubeService;
 let activeDownload: DownloadHandle | null = null;
+let downloadStarting = false;
 
 function setupContentSecurityPolicy(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -115,25 +116,31 @@ void app.whenReady().then(() => {
   ipcMain.handle('youtube:fetchPreview', (_e, url: string) => youtubeService.fetchMeta(url));
 
   ipcMain.handle('youtube:download', async (_e, url: string) => {
-    if (activeDownload) {
+    // Synchronous lock: prevents a second invocation from passing the guard
+    // while we await fetchMeta below (the activeDownload assignment was async).
+    if (activeDownload || downloadStarting) {
       throw new Error('A download is already in progress');
     }
-    const settings = settingsStore.get();
-    const meta = await youtubeService.fetchMeta(url);
-    const outputPath = join(settings.paths.downloads, `${meta.id}.mp4`);
-    const handle = youtubeService.download(url, outputPath, { videoId: meta.id });
-    activeDownload = handle;
-    handle.onProgress((p) => {
-      const win = BrowserWindow.getAllWindows()[0];
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('download:progress', p);
-      }
-    });
+    downloadStarting = true;
+    let handle: DownloadHandle | null = null;
     try {
+      const settings = settingsStore.get();
+      const meta = await youtubeService.fetchMeta(url);
+      const outputPath = join(settings.paths.downloads, `${meta.id}.mp4`);
+      handle = youtubeService.download(url, outputPath, { videoId: meta.id });
+      activeDownload = handle;
+      downloadStarting = false; // handle now owns the lock
+      handle.onProgress((p) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('download:progress', p);
+        }
+      });
       await handle.done;
       return { outputPath };
     } finally {
       activeDownload = null;
+      downloadStarting = false; // also clears on early throw before handle was set
     }
   });
 

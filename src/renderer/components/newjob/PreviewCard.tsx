@@ -14,12 +14,10 @@ export function PreviewCard({
   meta,
   onDownload,
   onClear,
-  downloadDisabled,
 }: {
   meta: VideoMeta;
   onDownload: () => void;
   onClear: () => void;
-  downloadDisabled?: boolean;
 }) {
   return (
     <article className="border-hairline bg-canvas shadow-1 overflow-hidden rounded-xl border">
@@ -35,8 +33,7 @@ export function PreviewCard({
           <button
             type="button"
             onClick={onDownload}
-            disabled={downloadDisabled}
-            className="bg-primary px-xl text-button-md text-on-primary h-12 rounded-full font-semibold disabled:opacity-50"
+            className="bg-primary px-xl text-button-md text-on-primary h-12 rounded-full font-semibold"
           >
             다운로드
           </button>
