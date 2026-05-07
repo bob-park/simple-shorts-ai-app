@@ -60,3 +60,22 @@ docker-compose*dev.yml
 .gstack/
 !.claude/superpowers/
 .superpowers/
+
+### simple-shorts-ai-app ###
+# electron-vite build output
+/out
+/dist
+/release
+
+# yarn berry internals (we use nodeLinker: node-modules, so this stays minimal)
+.yarn/cache
+.yarn/install-state.gz
+.pnp.*
+
+# logs
+/logs
+*.log
+
+# local workspaces (sample/working media — keep out of repo)
+/.scratch
+/workspace
