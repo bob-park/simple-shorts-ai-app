@@ -6,7 +6,7 @@
 
 **Architecture:** electron-vite for separate main/preload/renderer bundling with HMR. Strict secure defaults (contextIsolation: true, nodeIntegration: false, sandbox-friendly preload). React 18 + react-router-dom 6 for the renderer. CSS custom properties for the MiniMax design token system. All MiniMax tokens declared once in `tokens.css` so later milestones consume them by name.
 
-**Tech Stack:** Electron 33+, electron-vite 2+, React 18, TypeScript 5, react-router-dom 6, Vitest 2+, @testing-library/react 16+, ESLint 9 with `@bob-park/eslint-config-bobpark` (FlatCompat) + Prettier 3 with `@bob-park/prettier-config-bobpark`, @fontsource/dm-sans for offline DM Sans.
+**Tech Stack:** Electron 33+, electron-vite 2+, React 18, TypeScript 5, react-router-dom 6, **Tailwind CSS 4 with `@tailwindcss/vite`** (CSS-first `@theme` config mirrors MiniMax tokens), Vitest 2+, @testing-library/react 16+, ESLint 9 with `@bob-park/eslint-config-bobpark` (FlatCompat) + Prettier 3 with `@bob-park/prettier-config-bobpark` (configured via `package.json` `"prettier"` field), @fontsource/dm-sans for offline DM Sans.
 
 **Toolchain (already pinned in `.mise.toml`):** Node 24, Yarn 4.14.1. The plan uses Yarn throughout. Yarn 4's default Plug'n'Play resolver is incompatible with Electron's native module loading, so Task 1 sets `nodeLinker: node-modules` in `.yarnrc.yml`.
 
@@ -20,15 +20,15 @@
 ├── tsconfig.json                  # solution file (references node + web)
 ├── tsconfig.node.json             # main + preload (Node + Electron types)
 ├── tsconfig.web.json              # renderer (DOM + React)
-├── electron.vite.config.ts        # main / preload / renderer bundles
+├── electron.vite.config.ts        # main / preload / renderer bundles + @tailwindcss/vite
 ├── vitest.config.ts
 ├── eslint.config.mjs              # flat config (extends @bob-park/eslint-config-bobpark) — AUTHORED BY USER
-├── prettier.config.js             # re-exports @bob-park/prettier-config-bobpark
 ├── .yarnrc.yml                    # nodeLinker: node-modules + bob-park GH Packages registry — AUTHORED BY USER
 ├── .mise.toml                     # node 24 + yarn 4.14.1 — AUTHORED BY USER
 ├── .editorconfig
 ├── .gitignore
 ├── README.md
+# Note: Prettier config lives in package.json "prettier" field, not a standalone file.
 ├── src/
 │   ├── main/
 │   │   ├── main.ts                # Electron app + BrowserWindow + CSP
@@ -46,13 +46,10 @@
 │       │   ├── History.tsx        # placeholder
 │       │   └── Settings.tsx       # placeholder
 │       ├── components/
-│       │   ├── Sidebar.tsx        # 4 nav items, active state
-│       │   └── AppShell.tsx       # sidebar + outlet layout
+│       │   ├── Sidebar.tsx        # 4 nav items, active state (Tailwind utilities)
+│       │   └── AppShell.tsx       # sidebar + outlet layout (Tailwind utilities)
 │       └── styles/
-│           ├── reset.css          # tiny CSS reset
-│           ├── tokens.css         # MiniMax design tokens
-│           ├── typography.css     # DM Sans + scale tokens
-│           └── global.css         # body defaults
+│           └── global.css         # @import "tailwindcss"; @theme { MiniMax tokens }; @layer base { body }
 └── tests/
     └── renderer/
         └── App.test.tsx           # smoke: renders + nav works
@@ -239,7 +236,7 @@ yarn add \
   @fontsource/dm-sans@^5.1.0
 ```
 
-- [ ] **Step 2: Install dev dependencies (Electron + build)**
+- [ ] **Step 2: Install dev dependencies (Electron + build + Tailwind)**
 
 ```bash
 yarn add --dev \
@@ -250,8 +247,12 @@ yarn add --dev \
   typescript@^5.5.0 \
   @types/node@^22.0.0 \
   @types/react@^18.3.0 \
-  @types/react-dom@^18.3.0
+  @types/react-dom@^18.3.0 \
+  tailwindcss@^4.0.0 \
+  @tailwindcss/vite@^4.0.0
 ```
+
+> **Why Tailwind v4 + `@tailwindcss/vite`:** v4 uses CSS-first config with `@theme`, which maps directly onto our MiniMax design tokens (no JS `tailwind.config.ts` needed). The Vite plugin removes the PostCSS step entirely.
 
 - [ ] **Step 3: Install dev dependencies (test)**
 
@@ -290,6 +291,8 @@ ls -d \
   node_modules/react \
   node_modules/electron-vite \
   node_modules/vitest \
+  node_modules/tailwindcss \
+  node_modules/@tailwindcss/vite \
   node_modules/@bob-park/eslint-config-bobpark \
   node_modules/@bob-park/prettier-config-bobpark
 ```
@@ -411,6 +414,7 @@ Create `electron.vite.config.ts`:
 ```ts
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { resolve } from 'node:path';
 
 export default defineConfig({
@@ -440,7 +444,7 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
-    plugins: [react()],
+    plugins: [react(), tailwindcss()],
     build: {
       outDir: 'out/renderer',
       rollupOptions: {
@@ -461,6 +465,8 @@ export default defineConfig({
 });
 ```
 
+> The `@tailwindcss/vite` plugin auto-scans renderer source files for class names; no PostCSS or `tailwind.config.ts` needed.
+
 - [ ] **Step 2: Commit**
 
 ```bash
@@ -470,26 +476,15 @@ git commit -m "chore(m1): add electron-vite config for main/preload/renderer bun
 
 ---
 
-### Task 5: Prettier config (re-export bob-park base) + verify ESLint
+### Task 5: Verify ESLint + Prettier wiring
 
 **Files:**
-- Create: `prettier.config.js`
 - Verify (do not modify): `eslint.config.mjs` (already authored by user)
+- Verify (do not modify): `package.json` (already has `"prettier": "@bob-park/prettier-config-bobpark"` field added by user)
 
-- [ ] **Step 1: Create `prettier.config.js`**
+> No `prettier.config.js` is created — Prettier reads its config from the `"prettier"` field in `package.json`. Both ESLint and Prettier shared configs are already wired; this task just verifies they resolve correctly after Task 2's installs.
 
-Create `prettier.config.js`:
-```js
-import bobparkConfig from '@bob-park/prettier-config-bobpark';
-
-export default {
-  ...bobparkConfig
-};
-```
-
-> A standalone file (rather than the `"prettier"` field in `package.json`) lets us layer per-project overrides later without editing the shared config.
-
-- [ ] **Step 2: Verify the existing `eslint.config.mjs`**
+- [ ] **Step 1: Verify the existing `eslint.config.mjs`**
 
 Read `eslint.config.mjs` and confirm:
 - It imports `@bob-park/eslint-config-bobpark`
@@ -497,6 +492,15 @@ Read `eslint.config.mjs` and confirm:
 - It exports a `defineConfig([...])` array
 
 If anything is missing, leave the user's authored file structure alone and only add what's needed. Do **not** rewrite the file from scratch — the user maintains a uniform shape across their projects.
+
+- [ ] **Step 2: Verify the `package.json` Prettier field**
+
+Read `package.json` and confirm it contains:
+```json
+"prettier": "@bob-park/prettier-config-bobpark"
+```
+
+If missing, add the field (after `packageManager`). Do not change other keys.
 
 - [ ] **Step 3: Verify ESLint runs (no source files yet, so no errors)**
 
@@ -506,46 +510,58 @@ yarn lint
 
 Expected: exit code 0. If you see "Cannot find module '@bob-park/eslint-config-bobpark'", re-run Task 2 Step 4. If you see "FlatCompat is not a function", confirm `@eslint/eslintrc` is in dev dependencies.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Verify Prettier resolves the shared config**
 
 ```bash
-git add prettier.config.js
-git commit -m "chore(m1): wire prettier to @bob-park shared config"
+yarn prettier --check package.json
 ```
+
+Expected: exits 0 (file already matches) — proves Prettier successfully loaded the bob-park shared config from the package.json field. If it fails with "Cannot find module '@bob-park/prettier-config-bobpark'", re-run Task 2 Step 4.
+
+- [ ] **Step 5: Commit (only if `package.json` was modified above)**
+
+If you added the `"prettier"` field in Step 2:
+```bash
+git add package.json
+git commit -m "chore(m1): wire prettier to @bob-park shared config via package.json"
+```
+
+If `package.json` already had the field, skip the commit — there is nothing to commit for this task. Move to Task 6.
 
 ---
 
-### Task 6: MiniMax design tokens (CSS)
+### Task 6: Tailwind v4 + MiniMax design tokens
 
 **Files:**
-- Create: `src/renderer/styles/reset.css`
-- Create: `src/renderer/styles/tokens.css`
-- Create: `src/renderer/styles/typography.css`
 - Create: `src/renderer/styles/global.css`
 
-These CSS variables back the entire UI for all later milestones. Keep names matching the design spec exactly.
+In Tailwind v4, the entire design system lives in CSS via `@theme`. We define MiniMax tokens as Tailwind theme variables — Tailwind generates utilities like `bg-brand-coral`, `text-ink`, `p-md`, `rounded-hero` from these. Components consume them as utility classes; no separate `tokens.css` / `typography.css` / `reset.css` files (Preflight is included via `@import "tailwindcss"`).
 
-- [ ] **Step 1: Create `reset.css`**
+**Naming conventions:** Tailwind v4 prefixes determine which utility family is generated:
+- `--color-*` → `bg-*`, `text-*`, `border-*`
+- `--spacing-*` → `p-*`, `m-*`, `gap-*`, `w-*`, `h-*`
+- `--radius-*` → `rounded-*`
+- `--font-*` → `font-*`
+- `--text-*` → `text-*` (font-size; supports `--text-*--line-height` companion)
+- `--shadow-*` → `shadow-*`
 
-Create `src/renderer/styles/reset.css`:
+- [ ] **Step 1: Create `src/renderer/styles/global.css`**
+
+Create `src/renderer/styles/global.css`:
 ```css
-*, *::before, *::after { box-sizing: border-box; }
-* { margin: 0; }
-html, body, #root { height: 100%; }
-body { line-height: 1.5; -webkit-font-smoothing: antialiased; }
-img, picture, video, canvas, svg { display: block; max-width: 100%; }
-input, button, textarea, select { font: inherit; color: inherit; }
-button { background: none; border: none; padding: 0; cursor: pointer; }
-a { color: inherit; text-decoration: none; }
-ul, ol { list-style: none; padding: 0; }
-```
+@import "tailwindcss";
 
-- [ ] **Step 2: Create `tokens.css` (MiniMax color/space/radius/shadow tokens)**
+/* Load DM Sans once, all weights we use */
+@import "@fontsource/dm-sans/400.css";
+@import "@fontsource/dm-sans/500.css";
+@import "@fontsource/dm-sans/600.css";
+@import "@fontsource/dm-sans/700.css";
 
-Create `src/renderer/styles/tokens.css`:
-```css
-:root {
-  /* Brand & accent */
+@theme {
+  /* === Fonts === */
+  --font-sans: "DM Sans", "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+  /* === Colors: Brand & accent === */
   --color-brand-coral: #f4664a;
   --color-brand-magenta: #e046a8;
   --color-brand-blue: #2c70ff;
@@ -555,14 +571,14 @@ Create `src/renderer/styles/tokens.css`:
   --color-brand-cyan: #66c4ff;
   --color-brand-purple: #6f3fce;
 
-  /* Surface */
+  /* === Colors: Surface === */
   --color-canvas: #ffffff;
   --color-surface: #f5f5f5;
   --color-surface-soft: #fafafa;
   --color-hairline: #e3e3e3;
   --color-hairline-soft: #efefef;
 
-  /* Text */
+  /* === Colors: Text === */
   --color-primary: #1a1a1a;
   --color-on-primary: #ffffff;
   --color-on-dark: #ffffff;
@@ -574,25 +590,25 @@ Create `src/renderer/styles/tokens.css`:
   --color-stone: #999999;
   --color-muted: #b3b3b3;
 
-  /* Semantic */
+  /* === Colors: Semantic === */
   --color-success-bg: #e6f4ea;
   --color-success-text: #1e7a3c;
 
-  /* Spacing (4px base) */
-  --space-xxs: 4px;
-  --space-xs: 8px;
-  --space-sm: 12px;
-  --space-md: 16px;
-  --space-lg: 20px;
-  --space-xl: 24px;
-  --space-xxl: 32px;
-  --space-xxxl: 40px;
-  --space-section-sm: 48px;
-  --space-section: 64px;
-  --space-section-lg: 80px;
-  --space-hero: 96px;
+  /* === Spacing (4px base) === */
+  --spacing-xxs: 4px;
+  --spacing-xs: 8px;
+  --spacing-sm: 12px;
+  --spacing-md: 16px;
+  --spacing-lg: 20px;
+  --spacing-xl: 24px;
+  --spacing-xxl: 32px;
+  --spacing-xxxl: 40px;
+  --spacing-section-sm: 48px;
+  --spacing-section: 64px;
+  --spacing-section-lg: 80px;
+  --spacing-hero: 96px;
 
-  /* Radius */
+  /* === Radius === */
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;
@@ -601,81 +617,80 @@ Create `src/renderer/styles/tokens.css`:
   --radius-xxl: 20px;
   --radius-xxxl: 24px;
   --radius-hero: 32px;
-  --radius-full: 9999px;
 
-  /* Elevation */
+  /* === Elevation === */
   --shadow-1: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
   --shadow-2: 0 4px 6px 0 rgba(0, 0, 0, 0.08);
   --shadow-3: 0 0 22px 0 rgba(0, 0, 0, 0.08);
   --shadow-4: 0 12px 16px -4px rgba(36, 36, 36, 0.08);
+
+  /* === Type scale (size + line-height + letter-spacing) === */
+  --text-hero-display: 80px;
+  --text-hero-display--line-height: 1.10;
+  --text-hero-display--letter-spacing: -2px;
+
+  --text-display-lg: 56px;
+  --text-display-lg--line-height: 1.10;
+  --text-display-lg--letter-spacing: -1.5px;
+
+  --text-heading-lg: 40px;
+  --text-heading-lg--line-height: 1.20;
+  --text-heading-lg--letter-spacing: -1px;
+
+  --text-heading-md: 32px;
+  --text-heading-md--line-height: 1.25;
+  --text-heading-md--letter-spacing: -0.5px;
+
+  --text-heading-sm: 24px;
+  --text-heading-sm--line-height: 1.30;
+
+  --text-card-title: 20px;
+  --text-card-title--line-height: 1.40;
+
+  --text-subtitle: 18px;
+  --text-subtitle--line-height: 1.50;
+
+  --text-body-md: 16px;
+  --text-body-md--line-height: 1.50;
+
+  --text-body-sm: 14px;
+  --text-body-sm--line-height: 1.50;
+
+  --text-caption: 13px;
+  --text-caption--line-height: 1.70;
+
+  --text-micro: 12px;
+  --text-micro--line-height: 1.50;
+
+  --text-button-md: 14px;
+  --text-button-md--line-height: 1.40;
+}
+
+/* Body + #root defaults */
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #root {
+    display: flex;
+    min-height: 100vh;
+  }
 }
 ```
 
-- [ ] **Step 3: Create `typography.css`**
+> **Why one file:** With Tailwind v4 the design system is concise enough that splitting into reset/tokens/typography adds noise without value. If `global.css` later grows past ~250 lines, split tokens into a separate `theme.css` and `@import` it from `global.css`.
+>
+> **Note on `rounded-full`**: Tailwind v4 ships `rounded-full` as `9999px` natively — we don't need to add it as a custom token.
 
-Create `src/renderer/styles/typography.css`:
-```css
-@import '@fontsource/dm-sans/400.css';
-@import '@fontsource/dm-sans/500.css';
-@import '@fontsource/dm-sans/600.css';
-@import '@fontsource/dm-sans/700.css';
-
-:root {
-  --font-family-sans: 'DM Sans', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-
-  /* Type scale: size / line-height / letter-spacing */
-  --type-hero-display: 80px / 1.10 -2px;
-  --type-display-lg: 56px / 1.10 -1.5px;
-  --type-heading-lg: 40px / 1.20 -1px;
-  --type-heading-md: 32px / 1.25 -0.5px;
-  --type-heading-sm: 24px / 1.30 0;
-  --type-card-title: 20px / 1.40 0;
-  --type-subtitle: 18px / 1.50 0;
-  --type-body-md: 16px / 1.50 0;
-  --type-body-sm: 14px / 1.50 0;
-  --type-caption: 13px / 1.70 0;
-  --type-micro: 12px / 1.50 0;
-  --type-button-md: 14px / 1.40 0;
-}
-
-/* Convenience classes used by components */
-.text-heading-md { font: 600 var(--type-heading-md) var(--font-family-sans); letter-spacing: -0.5px; }
-.text-heading-sm { font: 600 var(--type-heading-sm) var(--font-family-sans); }
-.text-card-title { font: 600 var(--type-card-title) var(--font-family-sans); }
-.text-body-md { font: 400 var(--type-body-md) var(--font-family-sans); }
-.text-body-sm { font: 400 var(--type-body-sm) var(--font-family-sans); }
-.text-body-sm-medium { font: 500 var(--type-body-sm) var(--font-family-sans); }
-.text-caption { font: 400 var(--type-caption) var(--font-family-sans); }
-.text-button-md { font: 600 var(--type-button-md) var(--font-family-sans); }
-```
-
-> The `var(--type-*)` shorthand puts size, line-height, and letter-spacing into one font shorthand; if a later component needs different weight, set `font-weight` separately or use the convenience classes.
-
-- [ ] **Step 4: Create `global.css`**
-
-Create `src/renderer/styles/global.css`:
-```css
-@import './reset.css';
-@import './tokens.css';
-@import './typography.css';
-
-body {
-  font-family: var(--font-family-sans);
-  background: var(--color-canvas);
-  color: var(--color-ink);
-}
-
-#root {
-  display: flex;
-  min-height: 100%;
-}
-```
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 2: Commit**
 
 ```bash
 git add src/renderer/styles
-git commit -m "feat(m1): add MiniMax design tokens, DM Sans typography, and CSS reset"
+git commit -m "feat(m1): add Tailwind v4 with MiniMax design tokens via @theme"
 ```
 
 ---
@@ -932,9 +947,9 @@ Create `src/renderer/pages/NewJob.tsx`:
 ```tsx
 export function NewJobPage() {
   return (
-    <section style={{ padding: 'var(--space-section)' }}>
-      <h1 className="text-heading-md">새 작업</h1>
-      <p className="text-body-md" style={{ color: 'var(--color-slate)', marginTop: 'var(--space-md)' }}>
+    <section className="p-section">
+      <h1 className="text-heading-md font-semibold">새 작업</h1>
+      <p className="mt-md text-body-md text-slate">
         YouTube URL을 붙여넣고 옵션을 골라 숏츠 생성을 시작하는 화면. (M3에서 구현)
       </p>
     </section>
@@ -948,9 +963,9 @@ Create `src/renderer/pages/Progress.tsx`:
 ```tsx
 export function ProgressPage() {
   return (
-    <section style={{ padding: 'var(--space-section)' }}>
-      <h1 className="text-heading-md">작업 중</h1>
-      <p className="text-body-md" style={{ color: 'var(--color-slate)', marginTop: 'var(--space-md)' }}>
+    <section className="p-section">
+      <h1 className="text-heading-md font-semibold">작업 중</h1>
+      <p className="mt-md text-body-md text-slate">
         진행 중인 작업의 단계별 진행률과 라이브 로그. (M4 이후)
       </p>
     </section>
@@ -964,9 +979,9 @@ Create `src/renderer/pages/History.tsx`:
 ```tsx
 export function HistoryPage() {
   return (
-    <section style={{ padding: 'var(--space-section)' }}>
-      <h1 className="text-heading-md">히스토리</h1>
-      <p className="text-body-md" style={{ color: 'var(--color-slate)', marginTop: 'var(--space-md)' }}>
+    <section className="p-section">
+      <h1 className="text-heading-md font-semibold">히스토리</h1>
+      <p className="mt-md text-body-md text-slate">
         과거 작업 검색 + 리스트/썸네일 뷰 토글. (M9에서 구현)
       </p>
     </section>
@@ -980,9 +995,9 @@ Create `src/renderer/pages/Settings.tsx`:
 ```tsx
 export function SettingsPage() {
   return (
-    <section style={{ padding: 'var(--space-section)' }}>
-      <h1 className="text-heading-md">설정</h1>
-      <p className="text-body-md" style={{ color: 'var(--color-slate)', marginTop: 'var(--space-md)' }}>
+    <section className="p-section">
+      <h1 className="text-heading-md font-semibold">설정</h1>
+      <p className="mt-md text-body-md text-slate">
         API 키, LLM 모델, 경로, Whisper 모델, 자막 스타일. (M2에서 구현)
       </p>
     </section>
@@ -1025,38 +1040,21 @@ export function Sidebar() {
   return (
     <nav
       aria-label="주 내비게이션"
-      style={{
-        width: 220,
-        flexShrink: 0,
-        borderRight: '1px solid var(--color-hairline-soft)',
-        padding: 'var(--space-xl) var(--space-md)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 'var(--space-xxs)',
-        background: 'var(--color-canvas)'
-      }}
+      className="flex w-[220px] shrink-0 flex-col gap-xxs border-r border-hairline-soft bg-canvas px-md py-xl"
     >
-      <div
-        className="text-card-title"
-        style={{ padding: 'var(--space-xs) var(--space-md)', marginBottom: 'var(--space-md)' }}
-      >
-        Shorts AI
-      </div>
+      <div className="mb-md px-md py-xs text-card-title font-semibold">Shorts AI</div>
       {items.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}
           end={item.to === '/'}
-          style={({ isActive }) => ({
-            display: 'block',
-            padding: 'var(--space-xs) var(--space-md)',
-            borderRadius: 'var(--radius-sm)',
-            background: isActive ? 'var(--color-surface)' : 'transparent',
-            color: isActive ? 'var(--color-ink)' : 'var(--color-charcoal)',
-            fontWeight: isActive ? 500 : 400,
-            fontSize: '14px',
-            lineHeight: 1.5
-          })}
+          className={({ isActive }) =>
+            `block rounded-sm px-md py-xs text-body-sm ${
+              isActive
+                ? 'bg-surface text-ink font-medium'
+                : 'bg-transparent text-charcoal'
+            }`
+          }
         >
           {item.label}
         </NavLink>
@@ -1093,7 +1091,7 @@ export function AppShell() {
   return (
     <>
       <Sidebar />
-      <main style={{ flex: 1, overflowY: 'auto' }}>
+      <main className="flex-1 overflow-y-auto">
         <Outlet />
       </main>
     </>
@@ -1368,7 +1366,9 @@ All of these must be true before declaring M1 finished:
 
 ## Notes for the implementing agent
 
-- **Do not invent new design tokens.** Use only what's in `tokens.css`. If you need a value that's missing, add it to `tokens.css` (matching the spec naming) before consuming it.
+- **Use Tailwind utilities, not inline styles.** All component styling is via Tailwind classes generated from the `@theme` tokens in `global.css`. Do not write `style={{ ... }}` blocks except for truly dynamic computed values.
+- **Do not invent new design tokens.** Use only what's defined in the `@theme` block in `global.css`. If you need a value that's missing, add it there (matching the MiniMax spec naming) before consuming it.
+- **Do not create `tailwind.config.ts` or `postcss.config.js`** — Tailwind v4 with `@tailwindcss/vite` reads everything from CSS.
 - **Do not add a state management library** (Redux/Zustand). React Router state + local state is sufficient for M1.
 - **Do not introduce dark mode** — explicitly out of v1 scope.
 - **Do not add error boundaries or telemetry** — comes in later milestones where it has actual signal.
