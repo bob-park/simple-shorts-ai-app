@@ -56,6 +56,7 @@
 ```
 
 **Decomposition rationale:**
+
 - `src/main/`, `src/renderer/`, `src/shared/` are the three Electron processes' code regions; the type-shared layer (`shared/`) prevents duplication of IPC contracts in later milestones.
 - `components/` vs `pages/`: pages are mounted by the router; components are reused across pages. `AppShell` is a layout component that owns the sidebar + outlet split.
 - Styles split by concern (reset / tokens / typography / global) so later milestones can change one without touching the others.
@@ -67,12 +68,14 @@
 ### Task 1: Toolchain + repo + package.json scaffold
 
 **Files:**
+
 - Modify: `.gitignore` (already exists — extend with project-specific entries)
 - Create: `.editorconfig`
 - Create: `package.json`
 - Create: `README.md`
 
 **Pre-existing state to respect (do not delete or recreate):**
+
 - `.git/` — initialized on `master` (no commits yet, `.gitignore` and `.mise.toml` already staged)
 - `.mise.toml` — pins Node 24 + Yarn 4.14.1
 - `.gitignore` — Next.js-template baseline (we'll extend it, not replace)
@@ -80,14 +83,17 @@
 - `eslint.config.mjs` — already authored by the user, extends `@bob-park/eslint-config-bobpark` via `FlatCompat`
 
 **Environment requirement:** `@bob-park/*` packages live on GitHub Packages. Before running any `yarn add` for those, export a token:
+
 ```bash
 export GITHUB_NPM_AUTH_TOKEN="<your GitHub PAT with read:packages>"
 ```
+
 (or persist it in your shell rc / `.envrc`). Without this, `yarn add @bob-park/...` will fail with a 401 from npm.pkg.github.com.
 
 - [ ] **Step 1: Verify the toolchain is active**
 
 Run from project root:
+
 ```bash
 mise install
 node --version
@@ -126,6 +132,7 @@ Open `.gitignore` and append the block above (do not delete existing lines).
 - [ ] **Step 3: Verify `.yarnrc.yml` is correct (do not recreate)**
 
 Read `.yarnrc.yml` and confirm it contains at minimum:
+
 - `nodeLinker: node-modules`
 - `enableScripts: true` (Electron's native module postinstall scripts need this)
 - An `npmScopes.bob-park` entry pointing at `https://npm.pkg.github.com`
@@ -135,6 +142,7 @@ If any of these are missing, edit the file in place rather than overwriting it. 
 - [ ] **Step 4: Create `.editorconfig`**
 
 Create `.editorconfig`:
+
 ```
 root = true
 
@@ -153,6 +161,7 @@ trim_trailing_whitespace = false
 - [ ] **Step 5: Create `package.json`**
 
 Create `package.json`:
+
 ```json
 {
   "name": "simple-shorts-ai-app",
@@ -181,7 +190,8 @@ Create `package.json`:
 - [ ] **Step 6: Create minimal `README.md`**
 
 Create `README.md`:
-```markdown
+
+````markdown
 # Simple Shorts AI App
 
 YouTube → local Whisper STT → LLM highlight extraction → 9:16 shorts with burned-in captions.
@@ -203,18 +213,20 @@ yarn typecheck
 yarn test
 yarn lint
 ```
+````
 
 ## Status
 
 M1: Project Skeleton (in progress)
-```
+
+````
 
 - [ ] **Step 7: Stage and commit**
 
 ```bash
 git add .gitignore .yarnrc.yml .editorconfig package.json README.md .mise.toml eslint.config.mjs
 git commit -m "chore(m1): initialize repo with package.json, yarn berry config, and tooling"
-```
+````
 
 > The `.yarnrc.yml` and `eslint.config.mjs` files were authored by the user before this task started; they are part of the same logical bootstrap commit.
 
@@ -223,6 +235,7 @@ git commit -m "chore(m1): initialize repo with package.json, yarn berry config, 
 ### Task 2: Install dependencies
 
 **Files:**
+
 - Modify: `package.json` (yarn adds entries)
 - Create: `yarn.lock`
 
@@ -285,6 +298,7 @@ yarn add --dev \
 - [ ] **Step 5: Verify install**
 
 Run:
+
 ```bash
 ls -d \
   node_modules/electron \
@@ -311,6 +325,7 @@ git commit -m "chore(m1): install runtime and dev dependencies via yarn"
 ### Task 3: TypeScript configs
 
 **Files:**
+
 - Create: `tsconfig.json`
 - Create: `tsconfig.node.json`
 - Create: `tsconfig.web.json`
@@ -320,19 +335,18 @@ The renderer (DOM + React) and main/preload (Node) need different lib/types. A s
 - [ ] **Step 1: Create root `tsconfig.json` (references)**
 
 Create `tsconfig.json`:
+
 ```json
 {
   "files": [],
-  "references": [
-    { "path": "./tsconfig.node.json" },
-    { "path": "./tsconfig.web.json" }
-  ]
+  "references": [{ "path": "./tsconfig.node.json" }, { "path": "./tsconfig.web.json" }]
 }
 ```
 
 - [ ] **Step 2: Create `tsconfig.node.json` (main + preload + shared)**
 
 Create `tsconfig.node.json`:
+
 ```json
 {
   "compilerOptions": {
@@ -360,6 +374,7 @@ Create `tsconfig.node.json`:
 - [ ] **Step 3: Create `tsconfig.web.json` (renderer)**
 
 Create `tsconfig.web.json`:
+
 ```json
 {
   "compilerOptions": {
@@ -388,6 +403,7 @@ Create `tsconfig.web.json`:
 - [ ] **Step 4: Verify (will fail because no source files yet)**
 
 Run:
+
 ```bash
 yarn tsc -b --noEmit
 ```
@@ -406,6 +422,7 @@ git commit -m "chore(m1): add TypeScript project references for main/web"
 ### Task 4: electron-vite config + tsconfig path aliases
 
 **Files:**
+
 - Create: `electron.vite.config.ts`
 - Modify: `tsconfig.node.json` (add `paths` for `@shared/*`)
 - Modify: `tsconfig.web.json` (add `paths` for `@shared/*` and `@renderer/*`)
@@ -413,10 +430,11 @@ git commit -m "chore(m1): add TypeScript project references for main/web"
 - [ ] **Step 1: Create `electron.vite.config.ts`**
 
 Create `electron.vite.config.ts`:
+
 ```ts
-import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
-import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
+import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import { resolve } from 'node:path';
 
 export default defineConfig({
@@ -424,25 +442,25 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       outDir: 'out/main',
-      lib: { entry: resolve(__dirname, 'src/main/main.ts') }
+      lib: { entry: resolve(__dirname, 'src/main/main.ts') },
     },
     resolve: {
       alias: {
-        '@shared': resolve(__dirname, 'src/shared')
-      }
-    }
+        '@shared': resolve(__dirname, 'src/shared'),
+      },
+    },
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: {
       outDir: 'out/preload',
-      lib: { entry: resolve(__dirname, 'src/main/preload.ts') }
+      lib: { entry: resolve(__dirname, 'src/main/preload.ts') },
     },
     resolve: {
       alias: {
-        '@shared': resolve(__dirname, 'src/shared')
-      }
-    }
+        '@shared': resolve(__dirname, 'src/shared'),
+      },
+    },
   },
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
@@ -450,20 +468,20 @@ export default defineConfig({
     build: {
       outDir: 'out/renderer',
       rollupOptions: {
-        input: resolve(__dirname, 'src/renderer/index.html')
-      }
+        input: resolve(__dirname, 'src/renderer/index.html'),
+      },
     },
     resolve: {
       alias: {
         '@shared': resolve(__dirname, 'src/shared'),
-        '@renderer': resolve(__dirname, 'src/renderer')
-      }
+        '@renderer': resolve(__dirname, 'src/renderer'),
+      },
     },
     server: {
       port: 5173,
-      strictPort: true
-    }
-  }
+      strictPort: true,
+    },
+  },
 });
 ```
 
@@ -474,6 +492,7 @@ export default defineConfig({
 The Vite alias `@shared` is invisible to `tsc`. Without a tsconfig `paths` entry, `yarn typecheck` will fail with TS2307 the moment a file does `import { x } from '@shared/...'`. Mirror the Vite aliases here.
 
 Edit `tsconfig.node.json` — inside `compilerOptions`, AFTER `tsBuildInfoFile`, add:
+
 ```json
 "paths": {
   "@shared/*": ["./src/shared/*"]
@@ -485,6 +504,7 @@ Resulting `compilerOptions` block ends with `..., "tsBuildInfoFile": "./out/type
 - [ ] **Step 3: Add `paths` to `tsconfig.web.json`**
 
 Edit `tsconfig.web.json` — inside `compilerOptions`, AFTER `tsBuildInfoFile`, add:
+
 ```json
 "paths": {
   "@shared/*": ["./src/shared/*"],
@@ -512,6 +532,7 @@ git commit -m "chore(m1): add electron-vite config and mirror aliases as tsconfi
 ### Task 5: Verify ESLint + Prettier wiring
 
 **Files:**
+
 - Verify (do not modify): `eslint.config.mjs` (already authored by user)
 - Verify (do not modify): `package.json` (already has `"prettier": "@bob-park/prettier-config-bobpark"` field added by user)
 
@@ -520,6 +541,7 @@ git commit -m "chore(m1): add electron-vite config and mirror aliases as tsconfi
 - [ ] **Step 1: Verify the existing `eslint.config.mjs`**
 
 Read `eslint.config.mjs` and confirm:
+
 - It imports `@bob-park/eslint-config-bobpark`
 - It uses `FlatCompat` from `@eslint/eslintrc`
 - It exports a `defineConfig([...])` array
@@ -529,6 +551,7 @@ If anything is missing, leave the user's authored file structure alone and only 
 - [ ] **Step 2: Verify the `package.json` Prettier field**
 
 Read `package.json` and confirm it contains:
+
 ```json
 "prettier": "@bob-park/prettier-config-bobpark"
 ```
@@ -554,6 +577,7 @@ Expected: exits 0 (file already matches) — proves Prettier successfully loaded
 - [ ] **Step 5: Commit (only if `package.json` was modified above)**
 
 If you added the `"prettier"` field in Step 2:
+
 ```bash
 git add package.json
 git commit -m "chore(m1): wire prettier to @bob-park shared config via package.json"
@@ -566,11 +590,13 @@ If `package.json` already had the field, skip the commit — there is nothing to
 ### Task 6: Tailwind v4 + MiniMax design tokens
 
 **Files:**
+
 - Create: `src/renderer/styles/global.css`
 
 In Tailwind v4, the entire design system lives in CSS via `@theme`. We define MiniMax tokens as Tailwind theme variables — Tailwind generates utilities like `bg-brand-coral`, `text-ink`, `p-md`, `rounded-hero` from these. Components consume them as utility classes; no separate `tokens.css` / `typography.css` / `reset.css` files (Preflight is included via `@import "tailwindcss"`).
 
 **Naming conventions:** Tailwind v4 prefixes determine which utility family is generated:
+
 - `--color-*` → `bg-*`, `text-*`, `border-*`
 - `--spacing-*` → `p-*`, `m-*`, `gap-*`, `w-*`, `h-*`
 - `--radius-*` → `rounded-*`
@@ -581,18 +607,19 @@ In Tailwind v4, the entire design system lives in CSS via `@theme`. We define Mi
 - [ ] **Step 1: Create `src/renderer/styles/global.css`**
 
 Create `src/renderer/styles/global.css`:
+
 ```css
-@import "tailwindcss";
+@import 'tailwindcss';
 
 /* Load DM Sans once, all weights we use */
-@import "@fontsource/dm-sans/400.css";
-@import "@fontsource/dm-sans/500.css";
-@import "@fontsource/dm-sans/600.css";
-@import "@fontsource/dm-sans/700.css";
+@import '@fontsource/dm-sans/400.css';
+@import '@fontsource/dm-sans/500.css';
+@import '@fontsource/dm-sans/600.css';
+@import '@fontsource/dm-sans/700.css';
 
 @theme {
   /* === Fonts === */
-  --font-sans: "DM Sans", "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-sans: 'DM Sans', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
 
   /* === Colors: Brand & accent === */
   --color-brand-coral: #f4664a;
@@ -659,15 +686,15 @@ Create `src/renderer/styles/global.css`:
 
   /* === Type scale (size + line-height + letter-spacing) === */
   --text-hero-display: 80px;
-  --text-hero-display--line-height: 1.10;
+  --text-hero-display--line-height: 1.1;
   --text-hero-display--letter-spacing: -2px;
 
   --text-display-lg: 56px;
-  --text-display-lg--line-height: 1.10;
+  --text-display-lg--line-height: 1.1;
   --text-display-lg--letter-spacing: -1.5px;
 
   --text-heading-lg: 40px;
-  --text-heading-lg--line-height: 1.20;
+  --text-heading-lg--line-height: 1.2;
   --text-heading-lg--letter-spacing: -1px;
 
   --text-heading-md: 32px;
@@ -675,28 +702,28 @@ Create `src/renderer/styles/global.css`:
   --text-heading-md--letter-spacing: -0.5px;
 
   --text-heading-sm: 24px;
-  --text-heading-sm--line-height: 1.30;
+  --text-heading-sm--line-height: 1.3;
 
   --text-card-title: 20px;
-  --text-card-title--line-height: 1.40;
+  --text-card-title--line-height: 1.4;
 
   --text-subtitle: 18px;
-  --text-subtitle--line-height: 1.50;
+  --text-subtitle--line-height: 1.5;
 
   --text-body-md: 16px;
-  --text-body-md--line-height: 1.50;
+  --text-body-md--line-height: 1.5;
 
   --text-body-sm: 14px;
-  --text-body-sm--line-height: 1.50;
+  --text-body-sm--line-height: 1.5;
 
   --text-caption: 13px;
-  --text-caption--line-height: 1.70;
+  --text-caption--line-height: 1.7;
 
   --text-micro: 12px;
-  --text-micro--line-height: 1.50;
+  --text-micro--line-height: 1.5;
 
   --text-button-md: 14px;
-  --text-button-md--line-height: 1.40;
+  --text-button-md--line-height: 1.4;
 }
 
 /* Body + #root defaults */
@@ -731,6 +758,7 @@ git commit -m "feat(m1): add Tailwind v4 with MiniMax design tokens via @theme"
 ### Task 7: Shared IPC contract stub
 
 **Files:**
+
 - Create: `src/shared/ipc.ts`
 
 A typed surface for the renderer to call the main process. Empty for M1 (no IPC yet) but defined now so later milestones extend it.
@@ -738,6 +766,7 @@ A typed surface for the renderer to call the main process. Empty for M1 (no IPC 
 - [ ] **Step 1: Create `src/shared/ipc.ts`**
 
 Create `src/shared/ipc.ts`:
+
 ```ts
 /**
  * Typed IPC bridge between renderer and main.
@@ -769,6 +798,7 @@ git commit -m "feat(m1): declare typed IPC bridge shape (window.api)"
 ### Task 8: Electron main process
 
 **Files:**
+
 - Create: `src/main/main.ts`
 
 Secure defaults: contextIsolation on, nodeIntegration off, dev opens devtools but production locks them. CSP set via response headers.
@@ -776,8 +806,9 @@ Secure defaults: contextIsolation on, nodeIntegration off, dev opens devtools bu
 - [ ] **Step 1: Create `src/main/main.ts`**
 
 Create `src/main/main.ts`:
+
 ```ts
-import { app, BrowserWindow, session, shell } from 'electron';
+import { BrowserWindow, app, session, shell } from 'electron';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -795,13 +826,13 @@ function setupContentSecurityPolicy(): void {
       "img-src 'self' data: https:",
       `connect-src 'self'${isDev ? ' ws://localhost:5173 http://localhost:5173' : ''}`,
       "object-src 'none'",
-      "base-uri 'self'"
+      "base-uri 'self'",
     ].join('; ');
     callback({
       responseHeaders: {
         ...details.responseHeaders,
-        'Content-Security-Policy': [csp]
-      }
+        'Content-Security-Policy': [csp],
+      },
     });
   });
 }
@@ -818,8 +849,8 @@ function createMainWindow(): BrowserWindow {
       preload: join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
-    }
+      sandbox: false,
+    },
   });
 
   win.once('ready-to-show', () => win.show());
@@ -866,17 +897,19 @@ git commit -m "feat(m1): add Electron main process with secure defaults and CSP"
 ### Task 9: Preload script (typed bridge)
 
 **Files:**
+
 - Create: `src/main/preload.ts`
 
 - [ ] **Step 1: Create `src/main/preload.ts`**
 
 Create `src/main/preload.ts`:
+
 ```ts
-import { contextBridge, ipcRenderer } from 'electron';
 import type { AppApi } from '@shared/ipc';
+import { contextBridge, ipcRenderer } from 'electron';
 
 const api: AppApi = {
-  getAppVersion: () => ipcRenderer.invoke('app:getVersion')
+  getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
 };
 
 contextBridge.exposeInMainWorld('api', api);
@@ -887,7 +920,8 @@ contextBridge.exposeInMainWorld('api', api);
 Modify `src/main/main.ts` — add the import and handler. Replace the `void app.whenReady()...` block with:
 
 ```ts
-import { app, BrowserWindow, ipcMain, session, shell } from 'electron';
+import { BrowserWindow, app, ipcMain, session, shell } from 'electron';
+
 // ...everything else above stays the same...
 
 void app.whenReady().then(() => {
@@ -915,12 +949,14 @@ git commit -m "feat(m1): expose typed window.api bridge with app version probe"
 ### Task 10: Renderer entry point + index.html
 
 **Files:**
+
 - Create: `src/renderer/index.html`
 - Create: `src/renderer/main.tsx`
 
 - [ ] **Step 1: Create `src/renderer/index.html`**
 
 Create `src/renderer/index.html`:
+
 ```html
 <!DOCTYPE html>
 <html lang="ko">
@@ -939,11 +975,14 @@ Create `src/renderer/index.html`:
 - [ ] **Step 2: Create `src/renderer/main.tsx`**
 
 Create `src/renderer/main.tsx`:
+
 ```tsx
 import { StrictMode } from 'react';
+
 import { createRoot } from 'react-dom/client';
-import './styles/global.css';
+
 import { App } from './App';
+import './styles/global.css';
 
 const container = document.getElementById('root');
 if (!container) throw new Error('Root container missing');
@@ -951,7 +990,7 @@ if (!container) throw new Error('Root container missing');
 createRoot(container).render(
   <StrictMode>
     <App />
-  </StrictMode>
+  </StrictMode>,
 );
 ```
 
@@ -967,6 +1006,7 @@ git commit -m "feat(m1): add renderer entry point and HTML shell"
 ### Task 11: Placeholder pages (NewJob / Progress / History / Settings)
 
 **Files:**
+
 - Create: `src/renderer/pages/NewJob.tsx`
 - Create: `src/renderer/pages/Progress.tsx`
 - Create: `src/renderer/pages/History.tsx`
@@ -977,6 +1017,7 @@ Each page is a minimal stub now; later milestones flesh them out. Use a shared l
 - [ ] **Step 1: Create `src/renderer/pages/NewJob.tsx`**
 
 Create `src/renderer/pages/NewJob.tsx`:
+
 ```tsx
 export function NewJobPage() {
   return (
@@ -993,14 +1034,13 @@ export function NewJobPage() {
 - [ ] **Step 2: Create `src/renderer/pages/Progress.tsx`**
 
 Create `src/renderer/pages/Progress.tsx`:
+
 ```tsx
 export function ProgressPage() {
   return (
     <section className="p-section">
       <h1 className="text-heading-md font-semibold">작업 중</h1>
-      <p className="mt-md text-body-md text-slate">
-        진행 중인 작업의 단계별 진행률과 라이브 로그. (M4 이후)
-      </p>
+      <p className="mt-md text-body-md text-slate">진행 중인 작업의 단계별 진행률과 라이브 로그. (M4 이후)</p>
     </section>
   );
 }
@@ -1009,14 +1049,13 @@ export function ProgressPage() {
 - [ ] **Step 3: Create `src/renderer/pages/History.tsx`**
 
 Create `src/renderer/pages/History.tsx`:
+
 ```tsx
 export function HistoryPage() {
   return (
     <section className="p-section">
       <h1 className="text-heading-md font-semibold">히스토리</h1>
-      <p className="mt-md text-body-md text-slate">
-        과거 작업 검색 + 리스트/썸네일 뷰 토글. (M9에서 구현)
-      </p>
+      <p className="mt-md text-body-md text-slate">과거 작업 검색 + 리스트/썸네일 뷰 토글. (M9에서 구현)</p>
     </section>
   );
 }
@@ -1025,14 +1064,13 @@ export function HistoryPage() {
 - [ ] **Step 4: Create `src/renderer/pages/Settings.tsx`**
 
 Create `src/renderer/pages/Settings.tsx`:
+
 ```tsx
 export function SettingsPage() {
   return (
     <section className="p-section">
       <h1 className="text-heading-md font-semibold">설정</h1>
-      <p className="mt-md text-body-md text-slate">
-        API 키, LLM 모델, 경로, Whisper 모델, 자막 스타일. (M2에서 구현)
-      </p>
+      <p className="mt-md text-body-md text-slate">API 키, LLM 모델, 경로, Whisper 모델, 자막 스타일. (M2에서 구현)</p>
     </section>
   );
 }
@@ -1050,6 +1088,7 @@ git commit -m "feat(m1): add placeholder pages for NewJob/Progress/History/Setti
 ### Task 12: Sidebar component
 
 **Files:**
+
 - Create: `src/renderer/components/Sidebar.tsx`
 
 The sidebar has 4 nav items. Active item gets the MiniMax `sidebar-nav-item-active` treatment (surface background + ink text). Uses `NavLink` so React Router applies the active class automatically.
@@ -1057,6 +1096,7 @@ The sidebar has 4 nav items. Active item gets the MiniMax `sidebar-nav-item-acti
 - [ ] **Step 1: Create `src/renderer/components/Sidebar.tsx`**
 
 Create `src/renderer/components/Sidebar.tsx`:
+
 ```tsx
 import { NavLink } from 'react-router-dom';
 
@@ -1066,14 +1106,14 @@ const items: NavItem[] = [
   { to: '/', label: '새 작업' },
   { to: '/progress', label: '작업 중' },
   { to: '/history', label: '히스토리' },
-  { to: '/settings', label: '설정' }
+  { to: '/settings', label: '설정' },
 ];
 
 export function Sidebar() {
   return (
     <nav
       aria-label="주 내비게이션"
-      className="flex w-[220px] shrink-0 flex-col gap-xxs border-r border-hairline-soft bg-canvas px-md py-xl"
+      className="gap-xxs border-hairline-soft bg-canvas px-md py-xl flex w-[220px] shrink-0 flex-col border-r"
     >
       <div className="mb-md px-md py-xs text-card-title font-semibold">Shorts AI</div>
       {items.map((item) => (
@@ -1082,10 +1122,8 @@ export function Sidebar() {
           to={item.to}
           end={item.to === '/'}
           className={({ isActive }) =>
-            `block rounded-sm px-md py-xs text-body-sm ${
-              isActive
-                ? 'bg-surface text-ink font-medium'
-                : 'bg-transparent text-charcoal'
+            `px-md py-xs text-body-sm block rounded-sm ${
+              isActive ? 'bg-surface text-ink font-medium' : 'text-charcoal bg-transparent'
             }`
           }
         >
@@ -1109,6 +1147,7 @@ git commit -m "feat(m1): add sidebar with 4 nav items and MiniMax active styling
 ### Task 13: AppShell + Router + App
 
 **Files:**
+
 - Create: `src/renderer/components/AppShell.tsx`
 - Create: `src/renderer/router.tsx`
 - Create: `src/renderer/App.tsx`
@@ -1116,8 +1155,10 @@ git commit -m "feat(m1): add sidebar with 4 nav items and MiniMax active styling
 - [ ] **Step 1: Create `src/renderer/components/AppShell.tsx`**
 
 Create `src/renderer/components/AppShell.tsx`:
+
 ```tsx
 import { Outlet } from 'react-router-dom';
+
 import { Sidebar } from './Sidebar';
 
 export function AppShell() {
@@ -1135,12 +1176,14 @@ export function AppShell() {
 - [ ] **Step 2: Create `src/renderer/router.tsx`**
 
 Create `src/renderer/router.tsx`:
+
 ```tsx
 import { createHashRouter } from 'react-router-dom';
+
 import { AppShell } from './components/AppShell';
+import { HistoryPage } from './pages/History';
 import { NewJobPage } from './pages/NewJob';
 import { ProgressPage } from './pages/Progress';
-import { HistoryPage } from './pages/History';
 import { SettingsPage } from './pages/Settings';
 
 // Hash router avoids file:// path issues when running the packaged app.
@@ -1152,17 +1195,19 @@ export const router = createHashRouter([
       { index: true, element: <NewJobPage /> },
       { path: 'progress', element: <ProgressPage /> },
       { path: 'history', element: <HistoryPage /> },
-      { path: 'settings', element: <SettingsPage /> }
-    ]
-  }
+      { path: 'settings', element: <SettingsPage /> },
+    ],
+  },
 ]);
 ```
 
 - [ ] **Step 3: Create `src/renderer/App.tsx`**
 
 Create `src/renderer/App.tsx`:
+
 ```tsx
 import { RouterProvider } from 'react-router-dom';
+
 import { router } from './router';
 
 export function App() {
@@ -1182,6 +1227,7 @@ git commit -m "feat(m1): wire AppShell layout + hash router for the four pages"
 ### Task 14: Vitest setup + smoke test
 
 **Files:**
+
 - Create: `vitest.config.ts`
 - Create: `tests/setup.ts`
 - Create: `tests/renderer/App.test.tsx`
@@ -1189,31 +1235,33 @@ git commit -m "feat(m1): wire AppShell layout + hash router for the four pages"
 - [ ] **Step 1: Create `vitest.config.ts`**
 
 Create `vitest.config.ts`:
+
 ```ts
-import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
       '@shared': resolve(__dirname, 'src/shared'),
-      '@renderer': resolve(__dirname, 'src/renderer')
-    }
+      '@renderer': resolve(__dirname, 'src/renderer'),
+    },
   },
   test: {
     environment: 'jsdom',
     setupFiles: ['./tests/setup.ts'],
     globals: true,
-    css: false
-  }
+    css: false,
+  },
 });
 ```
 
 - [ ] **Step 2: Create `tests/setup.ts`**
 
 Create `tests/setup.ts`:
+
 ```ts
 import '@testing-library/jest-dom/vitest';
 ```
@@ -1221,10 +1269,12 @@ import '@testing-library/jest-dom/vitest';
 - [ ] **Step 3: Write the failing smoke test**
 
 Create `tests/renderer/App.test.tsx`:
+
 ```tsx
-import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { describe, expect, it } from 'vitest';
+
 import { App } from '../../src/renderer/App';
 
 describe('App shell', () => {
@@ -1273,6 +1323,7 @@ git commit -m "test(m1): smoke test for sidebar render and navigation"
 ### Task 15: Typecheck + lint clean pass
 
 **Files:**
+
 - (no new files — verifying everything compiles and lints)
 
 - [ ] **Step 1: Run typecheck**
@@ -1325,6 +1376,7 @@ Expected: Electron window opens within ~3 seconds. Sidebar on the left with 4 it
 - [ ] **Step 2: Manually click each sidebar item**
 
 For each of "새 작업" / "작업 중" / "히스토리" / "설정":
+
 - The clicked item gets the surface (`#f5f5f5`) background.
 - The main pane shows the matching heading (e.g., clicking "설정" shows a "설정" heading).
 - DM Sans is rendered (not the system fallback).
@@ -1355,6 +1407,7 @@ git status
 ### Task 17: Update README status
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Update the Status section**
