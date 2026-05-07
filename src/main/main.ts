@@ -1,4 +1,4 @@
-import { BrowserWindow, app, session, shell } from 'electron';
+import { BrowserWindow, app, ipcMain, session, shell } from 'electron';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -63,6 +63,9 @@ function createMainWindow(): BrowserWindow {
 
 void app.whenReady().then(() => {
   setupContentSecurityPolicy();
+
+  ipcMain.handle('app:getVersion', () => app.getVersion());
+
   createMainWindow();
 
   app.on('activate', () => {
