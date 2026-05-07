@@ -39,8 +39,14 @@ const PROGRESS_LINE = /^progress:\s*([\d.]+)%\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|
 const OUTFILE_PREFIX = 'OUTFILE:';
 /** yt-dlp's `after_move` hook fires after any merge/remux with the final filepath. */
 const PRINT_TEMPLATE = `after_move:${OUTFILE_PREFIX}%(filepath)s`;
-/** Format selector that prefers mp4-native streams to avoid an unwanted remux. */
-const FORMAT_SELECTOR = 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b';
+/**
+ * Best video + best audio. We deliberately don't pin the container to mp4 —
+ * YouTube increasingly serves AV1/VP9 in webm or mp4, and forcing mp4 either
+ * triggers a remux (slow, lossy) or produces "mp4 wrapper, AV1 codec inside"
+ * which fails on QuickTime. Letting yt-dlp pick the native format means the
+ * file extension always matches the actual codec/container.
+ */
+const FORMAT_SELECTOR = 'bv*+ba/b';
 
 export class YouTubeService {
   constructor(private readonly deps: YouTubeServiceDeps) {}
@@ -80,8 +86,6 @@ export class YouTubeService {
       `${outputStem}.%(ext)s`,
       '--format',
       FORMAT_SELECTOR,
-      '--merge-output-format',
-      'mp4',
       '--no-playlist',
       '--newline',
       `--progress-template=${PROGRESS_TEMPLATE}`,
