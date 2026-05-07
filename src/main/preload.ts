@@ -2,7 +2,7 @@ import type { AppApi } from '@shared/ipc';
 import type { Settings } from '@shared/settings';
 import { contextBridge, ipcRenderer } from 'electron';
 
-const api: AppApi = {
+const api = {
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),
@@ -13,7 +13,8 @@ const api: AppApi = {
   setApiKey: (key: string) => ipcRenderer.invoke('secure:setKey', key),
   clearApiKey: () => ipcRenderer.invoke('secure:clearKey'),
 
-  pickFolder: (opts) => ipcRenderer.invoke('dialog:pickFolder', opts),
+  pickFolder: (opts: { title?: string; defaultPath?: string }) =>
+    ipcRenderer.invoke('dialog:pickFolder', opts),
 };
 
-contextBridge.exposeInMainWorld('api', api);
+contextBridge.exposeInMainWorld('api', api as AppApi);

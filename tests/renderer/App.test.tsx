@@ -1,4 +1,5 @@
 import { App } from '@renderer/App';
+import type { AppApi } from '@shared/ipc';
 import type { Settings } from '@shared/settings';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -24,13 +25,13 @@ beforeAll(() => {
   window.api = {
     getAppVersion: () => Promise.resolve('0.0.0'),
     getSettings: () => Promise.resolve(STUB_SETTINGS),
-    updateSettings: (patch) => Promise.resolve({ ...STUB_SETTINGS, ...patch }),
+    updateSettings: (patch: Partial<Settings>) => Promise.resolve({ ...STUB_SETTINGS, ...patch }),
     resetSettings: () => Promise.resolve(STUB_SETTINGS),
     hasApiKey: () => Promise.resolve(false),
     setApiKey: () => Promise.resolve(),
     clearApiKey: () => Promise.resolve(),
     pickFolder: () => Promise.resolve(null),
-  };
+  } as unknown as AppApi;
 });
 
 describe('App shell', () => {

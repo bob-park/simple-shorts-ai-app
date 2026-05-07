@@ -1,4 +1,5 @@
 import { SettingsPage } from '@renderer/pages/Settings';
+import type { AppApi } from '@shared/ipc';
 import type { Settings } from '@shared/settings';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -30,7 +31,7 @@ function installApiMock(overrides?: Partial<Window['api']>) {
     setApiKey: vi.fn(async () => undefined),
     clearApiKey: vi.fn(async () => undefined),
   };
-  const api: Window['api'] = {
+  const api = {
     getAppVersion: vi.fn(async () => '0.0.1'),
     getSettings: vi.fn(async () => baseSettings),
     updateSettings: calls.updateSettings,
@@ -40,7 +41,7 @@ function installApiMock(overrides?: Partial<Window['api']>) {
     clearApiKey: calls.clearApiKey,
     pickFolder: vi.fn(async () => null),
     ...overrides,
-  };
+  } as unknown as AppApi;
   Object.defineProperty(window, 'api', { value: api, writable: true, configurable: true });
   return calls;
 }

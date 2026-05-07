@@ -1,4 +1,5 @@
 import type { Settings } from './settings';
+import type { DownloadProgress, VideoMeta } from './youtube';
 
 /**
  * Typed IPC bridge between renderer and main.
@@ -10,9 +11,7 @@ export interface AppApi {
 
   /** Settings persistence (electron-store backed). */
   getSettings(): Promise<Settings>;
-  /** Patch a subset of settings; main validates against the schema. */
   updateSettings(patch: Partial<Settings>): Promise<Settings>;
-  /** Reset to defaults (paths re-resolved to OS standard). */
   resetSettings(): Promise<Settings>;
 
   /** OpenRouter API key (safeStorage backed; never echoed back in plaintext). */
@@ -22,6 +21,18 @@ export interface AppApi {
 
   /** Native folder picker; returns selected absolute path or null on cancel. */
   pickFolder(opts: { title?: string; defaultPath?: string }): Promise<string | null>;
+
+  /** Fetches title/duration/thumbnail/etc. for a YouTube URL via yt-dlp. */
+  fetchVideoPreview(url: string): Promise<VideoMeta>;
+  /** Starts a download. Resolves to the absolute output path on success. */
+  downloadVideo(url: string): Promise<{ outputPath: string }>;
+  /** Cancels the active download (no-op if none in flight). */
+  cancelDownload(): Promise<void>;
+  /** Subscribe to download progress events. Returns an unsubscribe function. */
+  onDownloadProgress(callback: (p: DownloadProgress) => void): () => void;
+
+  /** Reveal a file in the OS file manager (Finder / Explorer). */
+  revealInFolder(absolutePath: string): Promise<void>;
 }
 
 declare global {
