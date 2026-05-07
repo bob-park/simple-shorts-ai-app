@@ -403,10 +403,12 @@ git commit -m "chore(m1): add TypeScript project references for main/web"
 
 ---
 
-### Task 4: electron-vite config
+### Task 4: electron-vite config + tsconfig path aliases
 
 **Files:**
 - Create: `electron.vite.config.ts`
+- Modify: `tsconfig.node.json` (add `paths` for `@shared/*`)
+- Modify: `tsconfig.web.json` (add `paths` for `@shared/*` and `@renderer/*`)
 
 - [ ] **Step 1: Create `electron.vite.config.ts`**
 
@@ -467,11 +469,42 @@ export default defineConfig({
 
 > The `@tailwindcss/vite` plugin auto-scans renderer source files for class names; no PostCSS or `tailwind.config.ts` needed.
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: Add `paths` to `tsconfig.node.json`**
+
+The Vite alias `@shared` is invisible to `tsc`. Without a tsconfig `paths` entry, `yarn typecheck` will fail with TS2307 the moment a file does `import { x } from '@shared/...'`. Mirror the Vite aliases here.
+
+Edit `tsconfig.node.json` — inside `compilerOptions`, AFTER `tsBuildInfoFile`, add:
+```json
+"paths": {
+  "@shared/*": ["./src/shared/*"]
+}
+```
+
+Resulting `compilerOptions` block ends with `..., "tsBuildInfoFile": "./out/types/node.tsbuildinfo", "paths": { "@shared/*": ["./src/shared/*"] } }`.
+
+- [ ] **Step 3: Add `paths` to `tsconfig.web.json`**
+
+Edit `tsconfig.web.json` — inside `compilerOptions`, AFTER `tsBuildInfoFile`, add:
+```json
+"paths": {
+  "@shared/*": ["./src/shared/*"],
+  "@renderer/*": ["./src/renderer/*"]
+}
+```
+
+- [ ] **Step 4: Verify configs still parse**
 
 ```bash
-git add electron.vite.config.ts
-git commit -m "chore(m1): add electron-vite config for main/preload/renderer bundles"
+yarn tsc -b --noEmit
+```
+
+Expected: still TS18003 ("no inputs") errors per config (because `src/` is empty), but no TS5102 / JSON parse errors. Adding `paths` is a `compilerOptions` addition, not a structural change.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add electron.vite.config.ts tsconfig.node.json tsconfig.web.json
+git commit -m "chore(m1): add electron-vite config and mirror aliases as tsconfig paths"
 ```
 
 ---
