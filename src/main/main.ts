@@ -1,18 +1,23 @@
 import type { Settings } from '@shared/settings';
 import { BrowserWindow, app, dialog, ipcMain, safeStorage, session, shell } from 'electron';
 import Store from 'electron-store';
+import { spawn } from 'node:child_process';
 import { promises as fsPromises } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import youtubeDl from 'youtube-dl-exec';
 
 import { SecureStorage } from './infra/SecureStorage';
 import { SettingsStore } from './infra/SettingsStore';
+import { type DownloadHandle, YouTubeService } from './services/YouTubeService';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const isDev = !app.isPackaged;
 
 let settingsStore: SettingsStore;
 let secureStorage: SecureStorage;
+let youtubeService: YouTubeService;
+let activeDownload: DownloadHandle | null = null;
 
 function setupContentSecurityPolicy(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -81,6 +86,11 @@ void app.whenReady().then(() => {
   });
   secureStorage = new SecureStorage(join(app.getPath('userData'), 'secrets.bin'), safeStorage, fsPromises);
 
+  youtubeService = new YouTubeService({
+    youtubeDl: youtubeDl as never,
+    spawn: spawn as never,
+  });
+
   // IPC handlers
   ipcMain.handle('app:getVersion', () => app.getVersion());
 
@@ -100,6 +110,39 @@ void app.whenReady().then(() => {
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0];
+  });
+
+  ipcMain.handle('youtube:fetchPreview', (_e, url: string) => youtubeService.fetchMeta(url));
+
+  ipcMain.handle('youtube:download', async (_e, url: string) => {
+    if (activeDownload) {
+      throw new Error('A download is already in progress');
+    }
+    const settings = settingsStore.get();
+    const meta = await youtubeService.fetchMeta(url);
+    const outputPath = join(settings.paths.downloads, `${meta.id}.mp4`);
+    const handle = youtubeService.download(url, outputPath, { videoId: meta.id });
+    activeDownload = handle;
+    handle.onProgress((p) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('download:progress', p);
+      }
+    });
+    try {
+      await handle.done;
+      return { outputPath };
+    } finally {
+      activeDownload = null;
+    }
+  });
+
+  ipcMain.handle('youtube:cancel', () => {
+    activeDownload?.cancel();
+  });
+
+  ipcMain.handle('shell:reveal', (_e, absolutePath: string) => {
+    shell.showItemInFolder(absolutePath);
   });
 
   createMainWindow();
