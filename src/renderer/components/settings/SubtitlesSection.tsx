@@ -21,14 +21,14 @@ export function SubtitlesSection({
   return (
     <SettingsCard title="자막 스타일" description="숏츠에 구워넣을 자막 모양을 설정하세요.">
       <SettingsRow label="자막 사용">
-        <label className="gap-xs flex items-center">
+        <span className="gap-xs flex items-center">
           <input
             type="checkbox"
             checked={subtitles.enabled}
             onChange={(e) => onChange({ ...subtitles, enabled: e.target.checked })}
           />
           <span className="text-body-sm text-ink">사용함</span>
-        </label>
+        </span>
       </SettingsRow>
       <SettingsRow label="폰트 패밀리" hint="시스템에 설치된 폰트 이름을 입력하세요.">
         <input
