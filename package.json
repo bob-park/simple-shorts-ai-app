@@ -31,6 +31,7 @@
     "@bob-park/prettier-config-bobpark": "0.3.1-RC1-20250912",
     "@eslint/eslintrc": "^3.1.0",
     "@tailwindcss/vite": "^4.0.0",
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.5.0",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.5.0",
