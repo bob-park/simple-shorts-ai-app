@@ -87,18 +87,22 @@ describe('YouTubeService.download', () => {
     });
   });
 
-  it('spawns yt-dlp with the configured output path and progress template', () => {
-    service.download('https://youtu.be/abc', '/tmp/abc.mp4', { videoId: 'abc' });
+  it('spawns yt-dlp with the %(ext)s template, mp4 merge format, and after_move print hook', () => {
+    service.download('https://youtu.be/abc', '/tmp/My Video', { videoId: 'abc' });
     expect(spawn).toHaveBeenCalledTimes(1);
     const args = spawn.mock.calls[0]?.[1] as string[];
     expect(args).toContain('--output');
-    expect(args).toContain('/tmp/abc.mp4');
+    expect(args).toContain('/tmp/My Video.%(ext)s');
+    expect(args).toContain('--merge-output-format');
+    expect(args).toContain('mp4');
+    expect(args).toContain('--print');
+    expect(args.some((a) => a.startsWith('after_move:OUTFILE:'))).toBe(true);
     expect(args).toContain('--newline');
     expect(args.some((a) => a.startsWith('--progress-template'))).toBe(true);
   });
 
   it('emits parsed progress events as yt-dlp writes lines', async () => {
-    const handle = service.download('https://youtu.be/abc', '/tmp/abc.mp4', {
+    const handle = service.download('https://youtu.be/abc', '/tmp/abc', {
       videoId: 'abc',
     });
     const events: number[] = [];
@@ -112,16 +116,25 @@ describe('YouTubeService.download', () => {
     expect(events).toEqual([12.3, 50.0, 100.0]);
   });
 
-  it('resolves done when yt-dlp exits with code 0', async () => {
-    const handle = service.download('https://youtu.be/abc', '/tmp/abc.mp4', {
+  it('resolves done with the captured outputPath on exit code 0', async () => {
+    const handle = service.download('https://youtu.be/abc', '/tmp/My Video', {
+      videoId: 'abc',
+    });
+    child.stdout.push('OUTFILE:/tmp/My Video.mp4\n');
+    child.emit('exit', 0);
+    await expect(handle.done).resolves.toEqual({ outputPath: '/tmp/My Video.mp4' });
+  });
+
+  it('rejects done with a clear error when exit 0 but no OUTFILE was emitted', async () => {
+    const handle = service.download('https://youtu.be/abc', '/tmp/abc', {
       videoId: 'abc',
     });
     child.emit('exit', 0);
-    await expect(handle.done).resolves.toBeUndefined();
+    await expect(handle.done).rejects.toThrow(/after_move/i);
   });
 
   it('rejects done with a descriptive error on non-zero exit', async () => {
-    const handle = service.download('https://youtu.be/abc', '/tmp/abc.mp4', {
+    const handle = service.download('https://youtu.be/abc', '/tmp/abc', {
       videoId: 'abc',
     });
     child.stderr.push('ERROR: Video unavailable\n');
@@ -129,8 +142,8 @@ describe('YouTubeService.download', () => {
     await expect(handle.done).rejects.toThrow(/Video unavailable|exit code 1/);
   });
 
-  it('cancel() sends SIGTERM and resolves done as canceled', async () => {
-    const handle = service.download('https://youtu.be/abc', '/tmp/abc.mp4', {
+  it('cancel() sends SIGTERM and rejects done as canceled', async () => {
+    const handle = service.download('https://youtu.be/abc', '/tmp/abc', {
       videoId: 'abc',
     });
     handle.cancel();

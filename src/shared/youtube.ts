@@ -43,6 +43,27 @@ export function isYoutubeUrl(input: string): boolean {
 }
 
 /**
+ * Sanitizes a video title into a filesystem-safe filename stem (no extension).
+ * Replaces forbidden characters (`<>:"/\|?*` and ASCII control chars) with `_`,
+ * collapses runs of whitespace to a single space, strips leading dots so the
+ * result isn't treated as a hidden file on Unix, and truncates to `maxLen`
+ * (default 20) before trimming any trailing whitespace, dots, or underscores.
+ * Returns `''` if nothing meaningful survives — callers should fall back to a
+ * stable identifier (typically the video id).
+ */
+export function sanitizeFilename(title: string, maxLen = 20): string {
+  const cleaned = title
+    // Forbidden filename characters on Windows + Unix slash + ASCII control
+    // chars. The control-char range is intentional — they corrupt filenames.
+    // eslint-disable-next-line no-control-regex
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+    .replace(/\s+/g, ' ')
+    .replace(/^\.+/, '_')
+    .trim();
+  return cleaned.slice(0, maxLen).replace(/[\s._]+$/, '');
+}
+
+/**
  * Extracts the video id from a YouTube URL. Supports `?v=` query param,
  * `youtu.be/<id>` short links, and `/shorts/<id>` URLs. Returns null on
  * unrecognized shapes.

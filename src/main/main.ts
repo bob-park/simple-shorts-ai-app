@@ -1,4 +1,5 @@
 import type { Settings } from '@shared/settings';
+import { sanitizeFilename } from '@shared/youtube';
 import { BrowserWindow, app, dialog, ipcMain, safeStorage, session, shell } from 'electron';
 import Store from 'electron-store';
 import { spawn } from 'node:child_process';
@@ -130,8 +131,11 @@ void app.whenReady().then(() => {
     try {
       const settings = settingsStore.get();
       const meta = await youtubeService.fetchMeta(url);
-      const outputPath = join(settings.paths.downloads, `${meta.id}.mp4`);
-      handle = youtubeService.download(url, outputPath, { videoId: meta.id });
+      // Filename = sanitized title (max 20 chars), with the video id as a
+      // safety fallback if sanitization strips the title to nothing.
+      const stem = sanitizeFilename(meta.title, 20) || meta.id;
+      const outputStem = join(settings.paths.downloads, stem);
+      handle = youtubeService.download(url, outputStem, { videoId: meta.id });
       activeDownload = handle;
       downloadStarting = false; // handle now owns the lock
       handle.onProgress((p) => {
@@ -140,8 +144,8 @@ void app.whenReady().then(() => {
           win.webContents.send('download:progress', p);
         }
       });
-      await handle.done;
-      return { outputPath };
+      const result = await handle.done;
+      return { outputPath: result.outputPath };
     } finally {
       activeDownload = null;
       downloadStarting = false; // also clears on early throw before handle was set

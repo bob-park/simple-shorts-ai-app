@@ -21,15 +21,26 @@ export interface DownloadOptions {
   videoId: string;
 }
 
+export interface DownloadResult {
+  /** Final absolute path of the downloaded file (extension chosen by yt-dlp). */
+  outputPath: string;
+}
+
 export interface DownloadHandle {
   onProgress(callback: (p: DownloadProgress) => void): void;
   cancel(): void;
-  done: Promise<void>;
+  done: Promise<DownloadResult>;
 }
 
 const PROGRESS_TEMPLATE =
   'progress: %(progress._percent_str)s|%(progress._eta_str)s|%(progress._downloaded_bytes_str)s|%(progress._total_bytes_str)s';
 const PROGRESS_LINE = /^progress:\s*([\d.]+)%\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*$/;
+
+const OUTFILE_PREFIX = 'OUTFILE:';
+/** yt-dlp's `after_move` hook fires after any merge/remux with the final filepath. */
+const PRINT_TEMPLATE = `after_move:${OUTFILE_PREFIX}%(filepath)s`;
+/** Format selector that prefers mp4-native streams to avoid an unwanted remux. */
+const FORMAT_SELECTOR = 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b';
 
 export class YouTubeService {
   constructor(private readonly deps: YouTubeServiceDeps) {}
@@ -53,29 +64,44 @@ export class YouTubeService {
     });
   }
 
-  download(url: string, outputPath: string, opts: DownloadOptions): DownloadHandle {
+  /**
+   * Starts a download. `outputStem` is the path WITHOUT extension —
+   * yt-dlp picks the actual extension via the `%(ext)s` template, then
+   * `done` resolves with the actual final path captured from yt-dlp's
+   * `after_move` print hook.
+   */
+  download(url: string, outputStem: string, opts: DownloadOptions): DownloadHandle {
     if (!isYoutubeUrl(url)) {
       throw new Error(`URL is not a recognized YouTube link: ${url}`);
     }
     const args = [
       url,
       '--output',
-      outputPath,
+      `${outputStem}.%(ext)s`,
       '--format',
-      'bv*+ba/b',
+      FORMAT_SELECTOR,
+      '--merge-output-format',
+      'mp4',
       '--no-playlist',
       '--newline',
       `--progress-template=${PROGRESS_TEMPLATE}`,
+      '--print',
+      PRINT_TEMPLATE,
     ];
     const child = this.deps.spawn(this.deps.binaryPath ?? 'yt-dlp', args, {});
 
     const progressCallbacks: ((p: DownloadProgress) => void)[] = [];
     let stderrBuffer = '';
+    let capturedPath: string | null = null;
     let canceled = false;
 
     child.stdout.on('data', (chunk: Buffer) => {
       const lines = chunk.toString().split(/\r?\n/);
       for (const line of lines) {
+        if (line.startsWith(OUTFILE_PREFIX)) {
+          capturedPath = line.slice(OUTFILE_PREFIX.length).trim();
+          continue;
+        }
         const m = PROGRESS_LINE.exec(line);
         if (!m) continue;
         const [, pctStr, etaStr, downStr, totStr] = m;
@@ -94,21 +120,30 @@ export class YouTubeService {
       stderrBuffer += chunk.toString();
     });
 
-    const done = new Promise<void>((resolve, reject) => {
+    const done = new Promise<DownloadResult>((resolve, reject) => {
       child.on('exit', (code: number | null) => {
-        // Defer one tick so any buffered stderr data events can fire before we
-        // read stderrBuffer (Node.js Readable emits 'data' via process.nextTick).
+        // Defer one tick so any buffered stdout/stderr data events can fire
+        // before we read the captured state (Node Readables emit 'data' via
+        // process.nextTick, which can post-date a synchronous 'exit').
         setImmediate(() => {
           if (canceled) {
             reject(new Error('Download canceled'));
             return;
           }
-          if (code === 0) {
-            resolve();
+          if (code !== 0) {
+            const msg = stderrBuffer.trim() || `yt-dlp exited with code ${code}`;
+            reject(new Error(msg));
             return;
           }
-          const msg = stderrBuffer.trim() || `yt-dlp exited with code ${code}`;
-          reject(new Error(msg));
+          if (!capturedPath) {
+            reject(
+              new Error(
+                "yt-dlp exited 0 but did not print an 'after_move' filepath; cannot determine the final output location",
+              ),
+            );
+            return;
+          }
+          resolve({ outputPath: capturedPath });
         });
       });
       child.on('error', (err: Error) => reject(err));
