@@ -1,3 +1,5 @@
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { YouTubeService } from './YouTubeService';
@@ -57,5 +59,82 @@ describe('YouTubeService.fetchMeta', () => {
   it('passes through yt-dlp execution errors', async () => {
     youtubeDl.mockRejectedValue(new Error('Video unavailable'));
     await expect(service.fetchMeta('https://youtu.be/x')).rejects.toThrow(/Video unavailable/);
+  });
+});
+
+class FakeChild extends EventEmitter {
+  stdout = new Readable({ read() {} });
+  stderr = new Readable({ read() {} });
+  killed = false;
+  kill(signal?: string): boolean {
+    this.killed = true;
+    queueMicrotask(() => this.emit('exit', signal === 'SIGTERM' ? null : 0));
+    return true;
+  }
+}
+
+describe('YouTubeService.download', () => {
+  let spawn: ReturnType<typeof vi.fn>;
+  let service: YouTubeService;
+  let child: FakeChild;
+
+  beforeEach(() => {
+    child = new FakeChild();
+    spawn = vi.fn(() => child);
+    service = new YouTubeService({
+      youtubeDl: vi.fn() as never,
+      spawn: spawn as never,
+    });
+  });
+
+  it('spawns yt-dlp with the configured output path and progress template', () => {
+    service.download('https://youtu.be/abc', '/tmp/abc.mp4', { videoId: 'abc' });
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const args = spawn.mock.calls[0]?.[1] as string[];
+    expect(args).toContain('--output');
+    expect(args).toContain('/tmp/abc.mp4');
+    expect(args).toContain('--newline');
+    expect(args.some((a) => a.startsWith('--progress-template'))).toBe(true);
+  });
+
+  it('emits parsed progress events as yt-dlp writes lines', async () => {
+    const handle = service.download('https://youtu.be/abc', '/tmp/abc.mp4', {
+      videoId: 'abc',
+    });
+    const events: number[] = [];
+    handle.onProgress((p) => events.push(p.percent));
+
+    child.stdout.push('progress: 12.3%|0:42|1.0MiB|10.0MiB\n');
+    child.stdout.push('progress: 50.0%|0:20|5.0MiB|10.0MiB\n');
+    child.stdout.push('progress: 100.0%|0:00|10.0MiB|10.0MiB\n');
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(events).toEqual([12.3, 50.0, 100.0]);
+  });
+
+  it('resolves done when yt-dlp exits with code 0', async () => {
+    const handle = service.download('https://youtu.be/abc', '/tmp/abc.mp4', {
+      videoId: 'abc',
+    });
+    child.emit('exit', 0);
+    await expect(handle.done).resolves.toBeUndefined();
+  });
+
+  it('rejects done with a descriptive error on non-zero exit', async () => {
+    const handle = service.download('https://youtu.be/abc', '/tmp/abc.mp4', {
+      videoId: 'abc',
+    });
+    child.stderr.push('ERROR: Video unavailable\n');
+    child.emit('exit', 1);
+    await expect(handle.done).rejects.toThrow(/Video unavailable|exit code 1/);
+  });
+
+  it('cancel() sends SIGTERM and resolves done as canceled', async () => {
+    const handle = service.download('https://youtu.be/abc', '/tmp/abc.mp4', {
+      videoId: 'abc',
+    });
+    handle.cancel();
+    await expect(handle.done).rejects.toThrow(/canceled/i);
+    expect(child.killed).toBe(true);
   });
 });
