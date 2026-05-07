@@ -15,7 +15,10 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "outDir": "./out/types/node",
-    "tsBuildInfoFile": "./out/types/node.tsbuildinfo"
+    "tsBuildInfoFile": "./out/types/node.tsbuildinfo",
+    "paths": {
+      "@shared/*": ["./src/shared/*"]
+    }
   },
   "include": ["src/main/**/*.ts", "src/shared/**/*.ts", "electron.vite.config.ts"]
 }

@@ -16,7 +16,11 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "outDir": "./out/types/web",
-    "tsBuildInfoFile": "./out/types/web.tsbuildinfo"
+    "tsBuildInfoFile": "./out/types/web.tsbuildinfo",
+    "paths": {
+      "@shared/*": ["./src/shared/*"],
+      "@renderer/*": ["./src/renderer/*"]
+    }
   },
   "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx", "src/shared/**/*.ts", "tests/**/*.ts", "tests/**/*.tsx"]
 }
