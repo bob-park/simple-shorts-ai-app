@@ -23,4 +23,5 @@ yarn lint
 ## Status
 
 - ✅ M1: Project Skeleton — Electron + React + TypeScript scaffold, MiniMax tokens, sidebar + 4 placeholder pages, smoke test.
-- ⏳ M2: Settings page (next)
+- ✅ M2: Settings page — 5 sections (API & 모델, 경로, Whisper 모델, 자막 스타일, 출력 옵션), electron-store persistence, safeStorage-encrypted API key, native folder dialogs.
+- ⏳ M3: YouTube preview + download (next)
