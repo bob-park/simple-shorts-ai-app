@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+/* Load DM Sans once, all weights we use */
+@import "@fontsource/dm-sans/400.css";
+@import "@fontsource/dm-sans/500.css";
+@import "@fontsource/dm-sans/600.css";
+@import "@fontsource/dm-sans/700.css";
+
+@theme {
+  /* === Fonts === */
+  --font-sans: "DM Sans", "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+  /* === Colors: Brand & accent === */
+  --color-brand-coral: #f4664a;
+  --color-brand-magenta: #e046a8;
+  --color-brand-blue: #2c70ff;
+  --color-brand-blue-deep: #1a4ccc;
+  --color-brand-blue-700: #2056cc;
+  --color-brand-blue-200: #d6e3ff;
+  --color-brand-cyan: #66c4ff;
+  --color-brand-purple: #6f3fce;
+
+  /* === Colors: Surface === */
+  --color-canvas: #ffffff;
+  --color-surface: #f5f5f5;
+  --color-surface-soft: #fafafa;
+  --color-hairline: #e3e3e3;
+  --color-hairline-soft: #efefef;
+
+  /* === Colors: Text === */
+  --color-primary: #1a1a1a;
+  --color-on-primary: #ffffff;
+  --color-on-dark: #ffffff;
+  --color-ink: #1a1a1a;
+  --color-ink-strong: #000000;
+  --color-charcoal: #2a2a2a;
+  --color-slate: #555555;
+  --color-steel: #777777;
+  --color-stone: #999999;
+  --color-muted: #b3b3b3;
+
+  /* === Colors: Semantic === */
+  --color-success-bg: #e6f4ea;
+  --color-success-text: #1e7a3c;
+
+  /* === Spacing (4px base) === */
+  --spacing-xxs: 4px;
+  --spacing-xs: 8px;
+  --spacing-sm: 12px;
+  --spacing-md: 16px;
+  --spacing-lg: 20px;
+  --spacing-xl: 24px;
+  --spacing-xxl: 32px;
+  --spacing-xxxl: 40px;
+  --spacing-section-sm: 48px;
+  --spacing-section: 64px;
+  --spacing-section-lg: 80px;
+  --spacing-hero: 96px;
+
+  /* === Radius === */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-xxl: 20px;
+  --radius-xxxl: 24px;
+  --radius-hero: 32px;
+
+  /* === Elevation === */
+  --shadow-1: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --shadow-2: 0 4px 6px 0 rgba(0, 0, 0, 0.08);
+  --shadow-3: 0 0 22px 0 rgba(0, 0, 0, 0.08);
+  --shadow-4: 0 12px 16px -4px rgba(36, 36, 36, 0.08);
+
+  /* === Type scale (size + line-height + letter-spacing) === */
+  --text-hero-display: 80px;
+  --text-hero-display--line-height: 1.10;
+  --text-hero-display--letter-spacing: -2px;
+
+  --text-display-lg: 56px;
+  --text-display-lg--line-height: 1.10;
+  --text-display-lg--letter-spacing: -1.5px;
+
+  --text-heading-lg: 40px;
+  --text-heading-lg--line-height: 1.20;
+  --text-heading-lg--letter-spacing: -1px;
+
+  --text-heading-md: 32px;
+  --text-heading-md--line-height: 1.25;
+  --text-heading-md--letter-spacing: -0.5px;
+
+  --text-heading-sm: 24px;
+  --text-heading-sm--line-height: 1.30;
+
+  --text-card-title: 20px;
+  --text-card-title--line-height: 1.40;
+
+  --text-subtitle: 18px;
+  --text-subtitle--line-height: 1.50;
+
+  --text-body-md: 16px;
+  --text-body-md--line-height: 1.50;
+
+  --text-body-sm: 14px;
+  --text-body-sm--line-height: 1.50;
+
+  --text-caption: 13px;
+  --text-caption--line-height: 1.70;
+
+  --text-micro: 12px;
+  --text-micro--line-height: 1.50;
+
+  --text-button-md: 14px;
+  --text-button-md--line-height: 1.40;
+}
+
+/* Body + #root defaults */
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #root {
+    display: flex;
+    min-height: 100vh;
+  }
+}
