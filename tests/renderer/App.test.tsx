@@ -1,7 +1,37 @@
 import { App } from '@renderer/App';
+import type { Settings } from '@shared/settings';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+
+const STUB_SETTINGS: Settings = {
+  paths: { downloads: '/dl', workspace: '/ws', outputs: '/out' },
+  llm: { provider: 'openrouter', model: 'anthropic/claude-sonnet-4-5' },
+  whisper: { model: 'small', language: 'auto', device: 'auto' },
+  shorts: { defaultCount: 3, minSec: 20, maxSec: 60 },
+  subtitles: {
+    enabled: true,
+    fontFamily: 'Pretendard',
+    fontSize: 64,
+    fillColor: '#FFFFFF',
+    outlineColor: '#000000',
+    position: 'bottom',
+  },
+  ui: { historyView: 'list', theme: 'light' },
+};
+
+beforeAll(() => {
+  window.api = {
+    getAppVersion: () => Promise.resolve('0.0.0'),
+    getSettings: () => Promise.resolve(STUB_SETTINGS),
+    updateSettings: (patch) => Promise.resolve({ ...STUB_SETTINGS, ...patch }),
+    resetSettings: () => Promise.resolve(STUB_SETTINGS),
+    hasApiKey: () => Promise.resolve(false),
+    setApiKey: () => Promise.resolve(),
+    clearApiKey: () => Promise.resolve(),
+    pickFolder: () => Promise.resolve(null),
+  };
+});
 
 describe('App shell', () => {
   it('renders the sidebar with all four nav items', () => {
