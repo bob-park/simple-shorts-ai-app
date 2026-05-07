@@ -22,4 +22,5 @@ yarn lint
 
 ## Status
 
-M1: Project Skeleton (in progress)
+- ✅ M1: Project Skeleton — Electron + React + TypeScript scaffold, MiniMax tokens, sidebar + 4 placeholder pages, smoke test.
+- ⏳ M2: Settings page (next)
