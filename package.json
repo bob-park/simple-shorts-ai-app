@@ -22,9 +22,11 @@
   "prettier": "@bob-park/prettier-config-bobpark",
   "dependencies": {
     "@fontsource/dm-sans": "^5.1.0",
+    "electron-store": "^10.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.2"
+    "react-router-dom": "^6.26.2",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@bob-park/eslint-config-bobpark": "0.2.4-RC1-20251111",
