@@ -1,9 +1,18 @@
-import { BrowserWindow, app, ipcMain, session, shell } from 'electron';
+import type { Settings } from '@shared/settings';
+import { BrowserWindow, app, dialog, ipcMain, safeStorage, session, shell } from 'electron';
+import Store from 'electron-store';
+import { promises as fsPromises } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { SecureStorage } from './infra/SecureStorage';
+import { SettingsStore } from './infra/SettingsStore';
+
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const isDev = !app.isPackaged;
+
+let settingsStore: SettingsStore;
+let secureStorage: SecureStorage;
 
 function setupContentSecurityPolicy(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -64,7 +73,34 @@ function createMainWindow(): BrowserWindow {
 void app.whenReady().then(() => {
   setupContentSecurityPolicy();
 
+  // Storage init
+  const electronStore = new Store<Settings>();
+  settingsStore = new SettingsStore(electronStore, {
+    downloads: app.getPath('downloads'),
+    documents: app.getPath('documents'),
+  });
+  secureStorage = new SecureStorage(join(app.getPath('userData'), 'secrets.bin'), safeStorage, fsPromises);
+
+  // IPC handlers
   ipcMain.handle('app:getVersion', () => app.getVersion());
+
+  ipcMain.handle('settings:get', () => settingsStore.get());
+  ipcMain.handle('settings:update', (_e, patch: Partial<Settings>) => settingsStore.update(patch));
+  ipcMain.handle('settings:reset', () => settingsStore.reset());
+
+  ipcMain.handle('secure:hasKey', () => secureStorage.hasKey());
+  ipcMain.handle('secure:setKey', (_e, key: string) => secureStorage.setKey(key));
+  ipcMain.handle('secure:clearKey', () => secureStorage.clearKey());
+
+  ipcMain.handle('dialog:pickFolder', async (_e, opts: { title?: string; defaultPath?: string }) => {
+    const result = await dialog.showOpenDialog({
+      title: opts.title,
+      defaultPath: opts.defaultPath,
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
 
   createMainWindow();
 
