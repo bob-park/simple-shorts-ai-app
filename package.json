@@ -19,5 +19,33 @@
     "node": ">=24.0.0"
   },
   "packageManager": "yarn@4.14.1",
-  "prettier": "@bob-park/prettier-config-bobpark"
+  "prettier": "@bob-park/prettier-config-bobpark",
+  "dependencies": {
+    "@fontsource/dm-sans": "^5.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2"
+  },
+  "devDependencies": {
+    "@bob-park/eslint-config-bobpark": "0.2.4-RC1-20251111",
+    "@bob-park/prettier-config-bobpark": "0.3.1-RC1-20250912",
+    "@eslint/eslintrc": "^3.1.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "@testing-library/jest-dom": "^6.5.0",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/user-event": "^14.5.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "electron": "^33.0.0",
+    "electron-vite": "^2.3.0",
+    "eslint": "^9.10.0",
+    "jsdom": "^25.0.0",
+    "prettier": "^3.3.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0",
+    "vitest": "^2.1.0"
+  }
 }
