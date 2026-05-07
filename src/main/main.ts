@@ -90,6 +90,10 @@ void app.whenReady().then(() => {
   youtubeService = new YouTubeService({
     youtubeDl: youtubeDl as never,
     spawn: spawn as never,
+    // The downloader spawns yt-dlp directly (separate from youtube-dl-exec's
+    // default export); without an explicit path it would fall back to
+    // PATH lookup and fail with ENOENT in dev. Point it at the bundled binary.
+    binaryPath: (youtubeDl as unknown as { constants: { YOUTUBE_DL_PATH: string } }).constants.YOUTUBE_DL_PATH,
   });
 
   // IPC handlers
