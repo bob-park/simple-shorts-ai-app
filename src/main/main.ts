@@ -36,7 +36,7 @@ function createMainWindow(): BrowserWindow {
     backgroundColor: '#ffffff',
     show: false,
     webPreferences: {
-      preload: join(__dirname, '../preload/preload.js'),
+      preload: join(__dirname, '../preload/preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
