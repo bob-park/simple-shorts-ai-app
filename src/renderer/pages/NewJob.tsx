@@ -1,10 +1,89 @@
+import { DownloadProgress } from '@renderer/components/newjob/DownloadProgress';
+import { PreviewCard } from '@renderer/components/newjob/PreviewCard';
+import { UrlInput } from '@renderer/components/newjob/UrlInput';
+import { useDownload } from '@renderer/hooks/useDownload';
+import { useVideoPreview } from '@renderer/hooks/useVideoPreview';
+
 export function NewJobPage() {
+  const preview = useVideoPreview();
+  const download = useDownload();
+
+  const downloadInFlight = download.status === 'starting' || download.status === 'downloading';
+
   return (
-    <section className="p-section">
-      <h1 className="text-heading-md font-semibold">새 작업</h1>
-      <p className="mt-md text-body-md text-slate">
-        YouTube URL을 붙여넣고 옵션을 골라 숏츠 생성을 시작하는 화면. (M3에서 구현)
-      </p>
+    <section className="gap-xl p-section flex flex-col">
+      <header>
+        <h1 className="text-heading-md text-ink font-semibold">새 작업</h1>
+        <p className="mt-md text-body-md text-slate">
+          YouTube URL을 입력하면 영상 정보를 미리 확인하고 다운로드할 수 있습니다.
+        </p>
+      </header>
+
+      <UrlInput
+        onSubmit={(url) => void preview.fetch(url)}
+        disabled={preview.state.status === 'loading' || downloadInFlight}
+      />
+
+      {preview.state.status === 'loading' ? <p className="text-body-md text-slate">영상 정보 가져오는 중...</p> : null}
+
+      {preview.state.status === 'error' ? (
+        <p className="text-body-md text-brand-coral">영상 정보를 불러오지 못했습니다: {preview.state.error.message}</p>
+      ) : null}
+
+      {preview.state.status === 'loaded' && download.state.status === 'idle' ? (
+        <PreviewCard
+          meta={preview.state.meta}
+          onDownload={() => {
+            if (preview.state.status === 'loaded') void download.start(preview.state.url);
+          }}
+          onClear={() => preview.reset()}
+        />
+      ) : null}
+
+      {download.state.status === 'starting' ? <DownloadProgress status="starting" /> : null}
+
+      {download.state.status === 'downloading' ? (
+        <DownloadProgress
+          status="downloading"
+          progress={download.state.progress}
+          onCancel={() => void download.cancel()}
+        />
+      ) : null}
+
+      {download.state.status === 'done' ? (
+        <DownloadProgress
+          status="done"
+          outputPath={download.state.outputPath}
+          onReveal={() => {
+            if (download.state.status === 'done') void window.api.revealInFolder(download.state.outputPath);
+          }}
+          onReset={() => {
+            download.reset();
+            preview.reset();
+          }}
+        />
+      ) : null}
+
+      {download.state.status === 'canceled' ? (
+        <DownloadProgress
+          status="canceled"
+          onReset={() => {
+            download.reset();
+            preview.reset();
+          }}
+        />
+      ) : null}
+
+      {download.state.status === 'error' ? (
+        <DownloadProgress
+          status="error"
+          error={download.state.error}
+          onReset={() => {
+            download.reset();
+            preview.reset();
+          }}
+        />
+      ) : null}
     </section>
   );
 }

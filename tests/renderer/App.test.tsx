@@ -1,9 +1,8 @@
 import { App } from '@renderer/App';
-import type { AppApi } from '@shared/ipc';
 import type { Settings } from '@shared/settings';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 const STUB_SETTINGS: Settings = {
   paths: { downloads: '/dl', workspace: '/ws', outputs: '/out' },
@@ -23,15 +22,22 @@ const STUB_SETTINGS: Settings = {
 
 beforeAll(() => {
   window.api = {
+    cancelDownload: vi.fn(async () => undefined),
+    clearApiKey: () => Promise.resolve(),
+    downloadVideo: vi.fn(async () => ({ outputPath: '/tmp/x.mp4' })),
+    fetchVideoPreview: vi.fn(async () => {
+      throw new Error('not used in this suite');
+    }),
     getAppVersion: () => Promise.resolve('0.0.0'),
     getSettings: () => Promise.resolve(STUB_SETTINGS),
-    updateSettings: (patch: Partial<Settings>) => Promise.resolve({ ...STUB_SETTINGS, ...patch }),
-    resetSettings: () => Promise.resolve(STUB_SETTINGS),
     hasApiKey: () => Promise.resolve(false),
-    setApiKey: () => Promise.resolve(),
-    clearApiKey: () => Promise.resolve(),
+    onDownloadProgress: vi.fn(() => () => undefined),
     pickFolder: () => Promise.resolve(null),
-  } as unknown as AppApi;
+    resetSettings: () => Promise.resolve(STUB_SETTINGS),
+    revealInFolder: vi.fn(async () => undefined),
+    setApiKey: () => Promise.resolve(),
+    updateSettings: (patch: Partial<Settings>) => Promise.resolve({ ...STUB_SETTINGS, ...patch }),
+  } satisfies Window['api'];
 });
 
 describe('App shell', () => {

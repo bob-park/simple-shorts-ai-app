@@ -1,5 +1,4 @@
 import { SettingsPage } from '@renderer/pages/Settings';
-import type { AppApi } from '@shared/ipc';
 import type { Settings } from '@shared/settings';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -31,17 +30,24 @@ function installApiMock(overrides?: Partial<Window['api']>) {
     setApiKey: vi.fn(async () => undefined),
     clearApiKey: vi.fn(async () => undefined),
   };
-  const api = {
+  const api: Window['api'] = {
+    cancelDownload: vi.fn(async () => undefined),
+    clearApiKey: calls.clearApiKey,
+    downloadVideo: vi.fn(async () => ({ outputPath: '/tmp/x.mp4' })),
+    fetchVideoPreview: vi.fn(async () => {
+      throw new Error('not used in this suite');
+    }),
     getAppVersion: vi.fn(async () => '0.0.1'),
     getSettings: vi.fn(async () => baseSettings),
-    updateSettings: calls.updateSettings,
-    resetSettings: vi.fn(async () => baseSettings),
     hasApiKey: vi.fn(async () => false),
-    setApiKey: calls.setApiKey,
-    clearApiKey: calls.clearApiKey,
+    onDownloadProgress: vi.fn(() => () => undefined),
     pickFolder: vi.fn(async () => null),
+    resetSettings: vi.fn(async () => baseSettings),
+    revealInFolder: vi.fn(async () => undefined),
+    setApiKey: calls.setApiKey,
+    updateSettings: calls.updateSettings,
     ...overrides,
-  } as unknown as AppApi;
+  };
   Object.defineProperty(window, 'api', { value: api, writable: true, configurable: true });
   return calls;
 }
