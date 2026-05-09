@@ -227,6 +227,20 @@ void app.whenReady().then(() => {
         }
       });
       const result = await handle.done;
+      // M9: persist the video metadata next to the source so render can build
+      // a history row. Keep it sibling to the .transcript.json / .highlights.json
+      // artifacts the later milestones already write.
+      try {
+        const metaPath = `${result.outputPath}.meta.json`;
+        await fsPromises.writeFile(
+          metaPath,
+          JSON.stringify({ ...meta, url, downloadedAt: new Date().toISOString() }, null, 2),
+          'utf8',
+        );
+      } catch (e) {
+        // Non-fatal — history record will fall back to a stub if missing.
+        process.stderr.write(`[m9] failed to write meta.json: ${(e as Error).message}\n`);
+      }
       return { outputPath: result.outputPath };
     } finally {
       activeDownload = null;
