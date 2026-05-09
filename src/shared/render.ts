@@ -19,6 +19,17 @@ export const RenderClipResultSchema = z.object({
   outputPath: z.string().optional(),
   /** Human-readable error (only when status==='failed' or 'canceled'). */
   error: z.string().optional(),
+  /**
+   * If face tracking was attempted: number of keyframes used and the path of
+   * the persisted track JSON. Absent when tracker was not provided OR when no
+   * faces were detected (caller used the M6 center-crop fallback).
+   */
+  tracking: z
+    .object({
+      frames: z.number().int().nonnegative(),
+      trackPath: z.string().min(1),
+    })
+    .nullish(),
 });
 export type RenderClipResult = z.infer<typeof RenderClipResultSchema>;
 
