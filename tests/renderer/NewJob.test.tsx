@@ -47,6 +47,7 @@ function installApiMock(overrides?: Partial<Window['api']>) {
           title: 'Opener',
           startSec: 0,
           endSec: 30,
+          montageDurationSec: 30,
           status: 'done' as const,
           outputPath: '/tmp/Me at the zoo/short_1.mp4',
         },

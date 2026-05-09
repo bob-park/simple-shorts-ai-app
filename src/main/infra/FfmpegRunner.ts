@@ -16,7 +16,7 @@ export interface RunOptions {
   args: readonly string[];
   /**
    * Expected duration of the clip in seconds — used to convert ffmpeg's
-   * `out_time_us` into a 0..1 fraction. Pass the highlight's `end_sec - start_sec`.
+   * `out_time_us` into a 0..1 fraction. Pass the sum of the highlight's segment durations.
    */
   durationSec: number;
 }

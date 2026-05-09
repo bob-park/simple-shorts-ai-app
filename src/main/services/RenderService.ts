@@ -234,6 +234,7 @@ export class RenderService {
       // History persistence (M9): coarse range = first segment start..last segment end.
       startSec: h.segments[0]!.start_sec,
       endSec: h.segments[h.segments.length - 1]!.end_sec,
+      montageDurationSec: h.segments.reduce((acc, s) => acc + (s.end_sec - s.start_sec), 0),
       status,
       outputPath,
       error,

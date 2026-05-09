@@ -98,7 +98,7 @@ export class HistoryService {
         const candidate = join(this.thumbsDir, `${shortId}.png`);
         thumbPath = await this.thumbs.extractMidpoint(r.outputPath, candidate, {
           startSec: 0,
-          endSec: r.endSec - r.startSec,
+          endSec: r.montageDurationSec,
         });
       }
       shorts.push({

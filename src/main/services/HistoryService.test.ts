@@ -44,6 +44,7 @@ function fakeRenderResult(
       title: `Short ${s.idx}`,
       startSec: 0,
       endSec: 30,
+      montageDurationSec: 30,
       status: s.status,
       outputPath: s.outputPath,
       error: s.status === 'failed' ? 'oops' : undefined,
@@ -185,5 +186,38 @@ describe('HistoryService', () => {
       whisperModel: 'small',
     });
     expect(mkdir).toHaveBeenCalledWith('/data/thumbs', { recursive: true });
+  });
+
+  it('uses montageDurationSec (not endSec-startSec) as thumbnail window for multi-segment highlights', async () => {
+    // Multi-segment: coarse span is 5..103 (98s), but rendered mp4 is only 6s (2 × 3s segments).
+    const multiSegResult: RenderResult = {
+      outputDir: '/tmp/out/Multi',
+      results: [
+        {
+          index: 1,
+          title: 'Multi-seg clip',
+          startSec: 5,
+          endSec: 103,
+          montageDurationSec: 10,
+          status: 'done',
+          outputPath: '/tmp/out/Multi/short_1.mp4',
+          tracking: null,
+          subtitles: null,
+        },
+      ],
+    };
+
+    await service.recordJob({
+      meta: fakeMeta(),
+      sourcePath: '/tmp/in.mp4',
+      highlightSet: fakeHighlightSet([fakeHighlight(5, 103, 'Multi')]),
+      renderResult: multiSegResult,
+      whisperModel: 'small',
+    });
+
+    // extractMidpoint must receive endSec: 10 (montageDurationSec), NOT endSec: 98 (endSec - startSec).
+    expect(thumbs.extractMidpoint).toHaveBeenCalledTimes(1);
+    const callOpts = thumbs.extractMidpoint.mock.calls[0]![2];
+    expect(callOpts).toEqual({ startSec: 0, endSec: 10 });
   });
 });
