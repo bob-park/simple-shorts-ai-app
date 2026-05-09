@@ -26,4 +26,5 @@ yarn lint
 - ✅ M2: Settings page
 - ✅ M3: YouTube preview + download — paste a URL, see meta card, download with live progress and cancel.
 - ✅ M4: Python sidecar + STT — uv-managed sidecar with faster-whisper, JSON-RPC stdio, lazy boot, transcript.json next to source.
-- ⏳ M5: LLM highlight extraction (next)
+- ✅ M5: LLM highlight extraction — OpenRouter via openai SDK, sliding-window for long transcripts, highlights.json next to source, in-app card list.
+- ⏳ M6: First end-to-end (ffmpeg simple crop) (next)
