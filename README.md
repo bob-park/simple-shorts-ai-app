@@ -38,4 +38,5 @@ yarn lint
 - ✅ M7: Smart face tracking — MediaPipe per-clip face tracking, Gaussian-smoothed sendcmd-driven dynamic crop, auto-fallback to center on detection failure.
 - ✅ M8: Subtitle burn-in — word-grouped TikTok-style ASS captions, libass-rendered in the same single-pass ffmpeg run, styled by Settings.
 - ✅ M9: History persistence — better-sqlite3 + FTS5, per-short ffmpeg thumbnails, list/grid view toggle, search/sort/status-filter, detail drawer with reveal/delete.
-- ⏳ M10: Packaging & distribution (next)
+- ✅ M10: Segment-based highlights — non-contiguous Whisper-segment montages, single-pass ffmpeg `select` filter, M7 tracking + M8 subtitles rebased to montage time. Replaces M5's word-level extraction.
+- ⏳ M11: Packaging & distribution (next — was M10 in original spec)
