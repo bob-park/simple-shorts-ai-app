@@ -1,5 +1,6 @@
 import type { AppApi } from '@shared/ipc';
 import type { Settings } from '@shared/settings';
+import type { TranscribeProgress } from '@shared/transcribe';
 import type { DownloadProgress } from '@shared/youtube';
 import { contextBridge, ipcRenderer } from 'electron';
 
@@ -27,7 +28,19 @@ const api: AppApi = {
     };
   },
 
+  transcribeFile: (audioPath: string) => ipcRenderer.invoke('transcribe:run', audioPath),
+  cancelTranscribe: () => ipcRenderer.invoke('transcribe:cancel'),
+  onTranscribeProgress: (callback: (p: TranscribeProgress) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, data: TranscribeProgress) => callback(data);
+    ipcRenderer.on('transcribe:progress', handler);
+    return () => {
+      ipcRenderer.off('transcribe:progress', handler);
+    };
+  },
+  sidecarHealth: () => ipcRenderer.invoke('sidecar:health'),
+
   revealInFolder: (absolutePath: string) => ipcRenderer.invoke('shell:reveal', absolutePath),
+  openPath: (absolutePath: string) => ipcRenderer.invoke('shell:openPath', absolutePath),
 };
 
 contextBridge.exposeInMainWorld('api', api);

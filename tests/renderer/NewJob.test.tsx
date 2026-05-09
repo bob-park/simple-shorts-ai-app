@@ -35,6 +35,14 @@ function installApiMock(overrides?: Partial<Window['api']>) {
     cancelDownload: calls.cancelDownload,
     onDownloadProgress: calls.onDownloadProgress,
     revealInFolder: calls.revealInFolder,
+    transcribeFile: vi.fn(async () => ({
+      transcriptPath: '/tmp/x.transcript.json',
+      transcript: { duration: 0, language: '', segments: [], words: [] },
+    })),
+    cancelTranscribe: vi.fn(async () => undefined),
+    onTranscribeProgress: vi.fn(() => () => undefined),
+    sidecarHealth: vi.fn(async () => ({ ok: true, modelsLoaded: [] })),
+    openPath: vi.fn(async () => undefined),
     ...overrides,
   };
   Object.defineProperty(window, 'api', { value: api, writable: true, configurable: true });
