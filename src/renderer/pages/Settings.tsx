@@ -33,7 +33,7 @@ export function SettingsPage() {
         </p>
       </header>
 
-      <ApiModelSection llm={settings.llm} onLlmChange={(llm) => void update({ llm })} />
+      <ApiModelSection />
       <PathsSection paths={settings.paths} onChange={(paths) => void update({ paths })} />
       <WhisperSection whisper={settings.whisper} onChange={(whisper) => void update({ whisper })} />
       <SubtitlesSection subtitles={settings.subtitles} onChange={(subtitles) => void update({ subtitles })} />

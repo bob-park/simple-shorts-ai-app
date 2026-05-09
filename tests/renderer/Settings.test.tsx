@@ -10,7 +10,6 @@ const baseSettings: Settings = {
     workspace: '/Users/test/Documents/SimpleShortsAI/workspace',
     outputs: '/Users/test/Downloads/SimpleShortsAI',
   },
-  llm: { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.5' },
   whisper: { model: 'small', language: 'auto', device: 'auto' },
   shorts: { defaultCount: 3, minSec: 20, maxSec: 60 },
   subtitles: {
@@ -85,21 +84,6 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('heading', { name: 'Whisper 모델' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '자막 스타일' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '출력 옵션' })).toBeInTheDocument();
-  });
-
-  it('saves an updated LLM model via window.api.updateSettings', async () => {
-    const calls = installApiMock();
-    const user = userEvent.setup();
-    render(<SettingsPage />);
-    await waitFor(() => screen.getByDisplayValue('anthropic/claude-sonnet-4.5'));
-    const input = screen.getByDisplayValue('anthropic/claude-sonnet-4.5');
-    await user.clear(input);
-    await user.type(input, 'openai/gpt-4.1');
-    await waitFor(() =>
-      expect(calls.updateSettings).toHaveBeenLastCalledWith(
-        expect.objectContaining({ llm: expect.objectContaining({ model: 'openai/gpt-4.1' }) }),
-      ),
-    );
   });
 
   it('saves an API key when the user enters one and clicks save', async () => {

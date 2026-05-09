@@ -18,10 +18,6 @@ export const SettingsSchema = z.object({
     workspace: z.string().min(1),
     outputs: z.string().min(1),
   }),
-  llm: z.object({
-    provider: z.literal('openrouter'),
-    model: z.string().min(1),
-  }),
   whisper: z.object({
     model: WhisperModelSchema,
     language: WhisperLanguageSchema,
@@ -62,10 +58,6 @@ export const DEFAULT_SETTINGS_TEMPLATE: Omit<Settings, 'paths'> & {
   paths: { downloads: ''; workspace: ''; outputs: '' };
 } = {
   paths: { downloads: '', workspace: '', outputs: '' },
-  llm: {
-    provider: 'openrouter',
-    model: 'anthropic/claude-sonnet-4.5',
-  },
   whisper: {
     model: 'small',
     language: 'auto',

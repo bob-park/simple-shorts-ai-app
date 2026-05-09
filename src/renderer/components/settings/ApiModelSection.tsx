@@ -1,19 +1,12 @@
 import { useState } from 'react';
 
 import { useApiKey } from '@renderer/hooks/useApiKey';
-import type { Settings } from '@shared/settings';
 
 import { PasswordInput } from './PasswordInput';
 import { SettingsCard } from './SettingsCard';
 import { SettingsRow } from './SettingsRow';
 
-export function ApiModelSection({
-  llm,
-  onLlmChange,
-}: {
-  llm: Settings['llm'];
-  onLlmChange: (next: Settings['llm']) => void;
-}) {
+export function ApiModelSection() {
   const { hasKey, setKey, clearKey } = useApiKey();
   const [draft, setDraft] = useState('');
 
@@ -24,7 +17,7 @@ export function ApiModelSection({
   }
 
   return (
-    <SettingsCard title="API & 모델" description="OpenRouter 키와 사용할 LLM 모델을 설정하세요.">
+    <SettingsCard title="API & 모델" description="LLM 모델 설정입니다.">
       <SettingsRow
         label="OpenRouter API 키"
         hint={
@@ -57,16 +50,6 @@ export function ApiModelSection({
             ) : null}
           </div>
         </div>
-      </SettingsRow>
-
-      <SettingsRow label="LLM 모델" hint="예: anthropic/claude-sonnet-4.5, openai/gpt-4.1, google/gemini-2.5-pro">
-        <input
-          type="text"
-          value={llm.model}
-          onChange={(e) => onLlmChange({ ...llm, model: e.target.value })}
-          spellCheck={false}
-          className="border-hairline bg-canvas px-md text-body-sm text-ink focus:border-brand-blue-deep h-10 w-full rounded-md border focus:outline-none"
-        />
       </SettingsRow>
     </SettingsCard>
   );

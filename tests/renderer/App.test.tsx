@@ -6,7 +6,6 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 const STUB_SETTINGS: Settings = {
   paths: { downloads: '/dl', workspace: '/ws', outputs: '/out' },
-  llm: { provider: 'openrouter', model: 'anthropic/claude-sonnet-4-5' },
   whisper: { model: 'small', language: 'auto', device: 'auto' },
   shorts: { defaultCount: 3, minSec: 20, maxSec: 60 },
   subtitles: {
