@@ -212,3 +212,22 @@ def test_track_faces_returns_empty_frames_when_no_faces_detected():
     final = [m for m in msgs if m.get("id") == "abc" and "result" in m]
     assert len(final) == 1
     assert final[0]["result"]["frames"] == []
+
+
+def test_dispatches_llm_model_status_to_engine():
+    class StubLlm:
+        def __init__(self):
+            self.called_with = None
+        def model_status(self, model_path):
+            self.called_with = model_path
+            return {"exists": True, "sizeBytes": 999, "loaded": False}
+
+    stub = StubLlm()
+    inbound, outbound = _run_server_with([
+        {"id": "x1", "method": "llm_model_status", "params": {"modelPath": "/tmp/m.gguf"}}
+    ])
+    server = Server(engine=StubEngine([]), llm_engine=stub)
+    server.run(inbound, outbound)
+    msgs = _drain(outbound)
+    assert {"id": "x1", "result": {"exists": True, "sizeBytes": 999, "loaded": False}} in msgs
+    assert stub.called_with == "/tmp/m.gguf"

@@ -12,13 +12,20 @@ from dataclasses import asdict
 from queue import Queue, Empty
 from typing import Any
 
+from .llm_engine import LlmEngine
 from .whisper_engine import TranscribeProgress, TranscribeResult, WhisperEngine
 
 
 class Server:
-    def __init__(self, engine: Any | None = None, face_tracker: Any | None = None) -> None:
+    def __init__(
+        self,
+        engine: Any | None = None,
+        face_tracker: Any | None = None,
+        llm_engine: Any | None = None,
+    ) -> None:
         self._engine = engine if engine is not None else WhisperEngine()
         self._face_tracker = face_tracker
+        self._llm_engine = llm_engine if llm_engine is not None else LlmEngine()
         self._cancel_event = threading.Event()
         self._active_job_id: str | None = None
         self._worker: threading.Thread | None = None
@@ -60,6 +67,9 @@ class Server:
             return
         if method == "track_faces":
             self._handle_track_faces(msg, outbound)
+            return
+        if method == "llm_model_status":
+            self._handle_llm_model_status(msg, outbound)
             return
         # Unknown method
         outbound.put(
@@ -141,6 +151,31 @@ class Server:
             with self._lock:
                 if self._active_job_id == job_id:
                     self._active_job_id = None
+
+    def _handle_llm_model_status(self, msg: dict, outbound: Queue) -> None:
+        params = msg.get("params") or {}
+        model_path = params.get("modelPath")
+        if not isinstance(model_path, str) or not model_path:
+            outbound.put(
+                {
+                    "id": msg.get("id"),
+                    "error": {"code": "invalid_params", "message": "modelPath is required"},
+                }
+            )
+            return
+        try:
+            result = self._llm_engine.model_status(model_path)
+            outbound.put({"id": msg.get("id"), "result": result})
+        except Exception as e:
+            outbound.put(
+                {
+                    "id": msg.get("id"),
+                    "error": {
+                        "code": "llm_model_status_failed",
+                        "message": f"{type(e).__name__}: {e}",
+                    },
+                }
+            )
 
     def _handle_track_faces(self, msg: dict, outbound: Queue) -> None:
         params = msg.get("params") or {}
