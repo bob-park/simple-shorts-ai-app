@@ -1,0 +1,1861 @@
+# M5: LLM Highlight Extraction Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Add a "하이라이트 추출" step that takes the M4-produced transcript, sends the words array (chunked for long videos) to OpenRouter via the OpenAI-compatible SDK, validates the structured response against a zod schema, and saves `<videoStem>.highlights.json` next to the source video. The NewJob page renders a `HighlightCard` chain after `transcribe.done`; clicking the button streams progress to the renderer and lands a list of `{ start_sec, end_sec, title, hook }` objects displayed as cards.
+
+**Architecture:** A thin `OpenRouterClient` (Node) wraps the `openai` npm package with `baseURL: 'https://openrouter.ai/api/v1'` and `apiKey` pulled from the existing `SecureStorage`. A pure `ChunkPlanner` decides whether to send the whole transcript in one call or split it into ~2500-word windows. `HighlightService` orchestrates: it asks ChunkPlanner for a plan, calls OpenRouterClient per chunk, validates each response with `HighlightSchema`, and (if multi-chunk) makes one final "rerank" call to pick the top N candidates. The IPC handler in main wires it up, writes the result to disk, and bubbles per-chunk progress to the renderer. The renderer adds one new component (`HighlightCard`) that handles 6 states: `missing-key` / `idle` / `extracting` / `done` / `canceled` / `error`. `missing-key` proactively detects no API key via `window.api.hasApiKey()` and links to `/settings` instead of letting the user click into a guaranteed failure.
+
+**Tech Stack:** `openai` ^4.x npm package (used against OpenRouter's OpenAI-compatible endpoint), reuses existing `electron-store` settings, `safeStorage`-backed `SecureStorage` from M2 for the API key, `AbortController` for cancel. TypeScript side reuses M4 patterns: zod schemas in `shared/`, IPC contract in `shared/ipc.ts`, services in `src/main/services/`, hooks + components in `src/renderer/`. Highlights persist alongside the transcript at `<source>.highlights.json` so the eventual M6 ffmpeg pipeline can find both deterministically.
+
+---
+
+## File Structure
+
+```
+package.json                              # MODIFY: add 'openai' dep
+src/
+├── shared/
+│   ├── highlight.ts                      # NEW: HighlightSchema + HighlightSetSchema (zod)
+│   ├── extract.ts                        # NEW: ExtractProgress + ExtractStatus types
+│   └── ipc.ts                            # MODIFY: add extractHighlights / cancelExtract / onExtractProgress
+├── main/
+│   ├── main.ts                           # MODIFY: instantiate client + service, register IPC, save highlights.json
+│   ├── preload.ts                        # MODIFY: bridge new methods + progress subscription
+│   ├── infra/
+│   │   ├── OpenRouterClient.ts           # NEW: openai-SDK wrapper, baseURL override
+│   │   └── OpenRouterClient.test.ts      # NEW: vitest with mocked SDK constructor
+│   └── services/
+│       ├── ChunkPlanner.ts               # NEW: pure word-count chunk planning
+│       ├── ChunkPlanner.test.ts          # NEW: vitest pure-functional tests
+│       ├── HighlightService.ts           # NEW: orchestrate prompt + chunks + rerank + validate
+│       └── HighlightService.test.ts      # NEW: vitest with mocked OpenRouterClient
+└── renderer/
+    ├── hooks/
+    │   └── useHighlights.ts              # NEW: state machine (incl. missing-key probe)
+    ├── components/newjob/
+    │   └── HighlightCard.tsx             # NEW: 6 visual states
+    └── pages/NewJob.tsx                  # MODIFY: render HighlightCard chain when transcribe.done
+tests/renderer/
+├── App.test.tsx                          # MODIFY: extend api mock with extract methods
+├── Settings.test.tsx                     # MODIFY: same
+└── NewJob.test.tsx                       # MODIFY: same + smoke test for 하이라이트 추출
+```
+
+**Decomposition rationale:**
+
+- `ChunkPlanner` is pure word-count logic with zero IO — easy to unit-test exhaustively. Keeping the chunking heuristic out of `HighlightService` makes the service responsible only for orchestration (one prompt → one call → one validation per chunk + final rerank).
+- `OpenRouterClient` is a transport-only wrapper — it exists so tests of `HighlightService` can swap a fake client without mocking the openai SDK at module level.
+- The renderer adds one component (`HighlightCard`) following the same shape as M4's `TranscribeCard`. The 6th state (`missing-key`) is unique to this flow because LLM calls require user-supplied credentials whereas STT does not.
+- `extract.ts` is separate from `highlight.ts` because progress is process-local (chunk index / total) while `highlight.ts` is the persisted artifact contract — different lifecycles.
+
+---
+
+## Tasks
+
+### Task 1: Add `openai` dependency
+
+**Files:**
+- Modify: `package.json`
+- Modify: `yarn.lock` (regenerated by yarn install)
+
+- [ ] **Step 1: Add the dep**
+
+```bash
+cd /Users/hwpark/Documents/webstorm-workspace/simple-shorts-ai-app
+yarn add openai@^4.71.0
+```
+
+This installs the official OpenAI Node SDK. We use it against OpenRouter via `baseURL: 'https://openrouter.ai/api/v1'`. OpenRouter's API is OpenAI-compatible for chat-completions including `response_format: { type: 'json_object' }`, so this SDK is the simplest stable choice.
+
+- [ ] **Step 2: Verify install**
+
+```bash
+node -e "console.log(require.resolve('openai'))"
+```
+
+Expected: prints a path inside `node_modules/openai/index.mjs` (or similar). If it errors, re-run `yarn install`.
+
+- [ ] **Step 3: Confirm it doesn't break the existing build**
+
+```bash
+yarn typecheck && yarn lint && yarn test 2>&1 | tail -5
+```
+
+Expected: typecheck 0 errors, lint 0 errors (1 known `__dirname` warning OK), all tests pass.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add package.json yarn.lock
+git commit -m "chore(m5): add openai SDK for OpenRouter chat completions"
+```
+
+---
+
+### Task 2: Shared Highlight + Extract types (zod)
+
+**Files:**
+- Create: `src/shared/highlight.ts`
+- Create: `src/shared/extract.ts`
+
+- [ ] **Step 1: Create `src/shared/highlight.ts`**
+
+```ts
+import { z } from 'zod';
+
+/**
+ * One highlight clip the LLM picked out of the transcript. Time fields are
+ * seconds from the start of the source video (the same timeline used by the
+ * Transcript word array).
+ */
+export const HighlightSchema = z
+  .object({
+    start_sec: z.number().nonnegative(),
+    end_sec: z.number().nonnegative(),
+    title: z.string().min(1),
+    /** One-line hook describing why this clip would grab a viewer. */
+    hook: z.string().min(1),
+  })
+  .refine((v) => v.end_sec > v.start_sec, {
+    message: 'end_sec must be greater than start_sec',
+    path: ['end_sec'],
+  });
+export type Highlight = z.infer<typeof HighlightSchema>;
+
+/** Persisted alongside the source video as `<videoStem>.highlights.json`. */
+export const HighlightSetSchema = z.object({
+  /** ISO 8601 timestamp the LLM call completed. */
+  generatedAt: z.string().min(1),
+  /** Model id passed to OpenRouter, e.g. 'anthropic/claude-sonnet-4.5'. */
+  model: z.string().min(1),
+  /** Absolute path of the source video this set was generated from. */
+  audioPath: z.string().min(1),
+  highlights: z.array(HighlightSchema),
+});
+export type HighlightSet = z.infer<typeof HighlightSetSchema>;
+```
+
+- [ ] **Step 2: Create `src/shared/extract.ts`**
+
+```ts
+import { z } from 'zod';
+
+export const ExtractProgressSchema = z.object({
+  jobId: z.string().min(1),
+  /** 1-based chunk index currently being processed. */
+  chunkIndex: z.number().int().positive(),
+  /** Total chunks in the plan (1 if the whole transcript fits in one call). */
+  chunkTotal: z.number().int().positive(),
+  /** Discriminator for which phase we're in. */
+  phase: z.enum(['chunk', 'rerank']),
+});
+export type ExtractProgress = z.infer<typeof ExtractProgressSchema>;
+
+export type ExtractStatus =
+  | 'missing-key'
+  | 'idle'
+  | 'extracting'
+  | 'done'
+  | 'canceled'
+  | 'error';
+```
+
+- [ ] **Step 3: Format + verify**
+
+```bash
+yarn prettier --write src/shared/highlight.ts src/shared/extract.ts
+yarn lint && yarn typecheck
+```
+
+Expected: lint 0 errors, typecheck 0 errors.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/shared/highlight.ts src/shared/extract.ts
+git commit -m "feat(m5): add shared Highlight + Extract zod schemas"
+```
+
+---
+
+### Task 3: IPC contract extension
+
+**Files:**
+- Modify: `src/shared/ipc.ts`
+
+- [ ] **Step 1: Add the new types and methods**
+
+Replace the contents of `src/shared/ipc.ts` ENTIRELY with:
+
+```ts
+import type { ExtractProgress } from './extract';
+import type { HighlightSet } from './highlight';
+import type { Settings } from './settings';
+import type { TranscribeProgress } from './transcribe';
+import type { Transcript } from './transcript';
+import type { DownloadProgress, VideoMeta } from './youtube';
+
+export interface AppApi {
+  getAppVersion(): Promise<string>;
+
+  getSettings(): Promise<Settings>;
+  updateSettings(patch: Partial<Settings>): Promise<Settings>;
+  resetSettings(): Promise<Settings>;
+
+  hasApiKey(): Promise<boolean>;
+  setApiKey(key: string): Promise<void>;
+  clearApiKey(): Promise<void>;
+
+  pickFolder(opts: { title?: string; defaultPath?: string }): Promise<string | null>;
+
+  fetchVideoPreview(url: string): Promise<VideoMeta>;
+  downloadVideo(url: string): Promise<{ outputPath: string }>;
+  cancelDownload(): Promise<void>;
+  onDownloadProgress(callback: (p: DownloadProgress) => void): () => void;
+
+  /** Transcribe an existing audio/video file via the Python sidecar. */
+  transcribeFile(audioPath: string): Promise<{ transcriptPath: string; transcript: Transcript }>;
+  /** Cancel the active transcription (no-op if none). */
+  cancelTranscribe(): Promise<void>;
+  /** Subscribe to transcribe progress notifications. Returns unsubscribe. */
+  onTranscribeProgress(callback: (p: TranscribeProgress) => void): () => void;
+  /** Health-check the Python sidecar (will boot it lazily if needed). */
+  sidecarHealth(): Promise<{ ok: boolean; modelsLoaded: string[] }>;
+
+  /**
+   * Extract highlight clips from a previously-transcribed video. Reads the
+   * sibling `<audioPath>.transcript.json`, sends words to OpenRouter, writes
+   * `<audioPath>.highlights.json`. Throws `MissingApiKeyError` (message
+   * starts with `OpenRouter API key is not set`) if no key is configured.
+   */
+  extractHighlights(audioPath: string): Promise<{ highlightsPath: string; highlightSet: HighlightSet }>;
+  /** Cancel the active highlight extraction (no-op if none). */
+  cancelExtract(): Promise<void>;
+  /** Subscribe to extract progress notifications. Returns unsubscribe. */
+  onExtractProgress(callback: (p: ExtractProgress) => void): () => void;
+
+  revealInFolder(absolutePath: string): Promise<void>;
+  /** Open a file with the OS default app (e.g., transcript.json → text editor). */
+  openPath(absolutePath: string): Promise<void>;
+}
+
+declare global {
+  interface Window {
+    api: AppApi;
+  }
+}
+
+export {};
+```
+
+- [ ] **Step 2: Format + typecheck (lint will fail until preload + stubs are updated)**
+
+```bash
+yarn prettier --write src/shared/ipc.ts
+yarn typecheck
+```
+
+Expected: typecheck FAILS only at `src/main/preload.ts` and `tests/renderer/*.test.tsx` (because they don't yet implement the new methods). Errors elsewhere are real bugs — fix before committing.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/shared/ipc.ts
+git commit -m "feat(m5): extend AppApi with extractHighlights/cancelExtract/onExtractProgress"
+```
+
+---
+
+### Task 4: ChunkPlanner (TDD pure logic)
+
+**Files:**
+- Create: `src/main/services/ChunkPlanner.ts`
+- Create: `src/main/services/ChunkPlanner.test.ts`
+
+`ChunkPlanner` is pure: in goes a word array + thresholds, out goes a chunk plan. No IO, no LLM calls, trivial to test exhaustively.
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `src/main/services/ChunkPlanner.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+
+import { planChunks } from './ChunkPlanner';
+
+function fakeWords(count: number, startSec = 0): { start: number; end: number; text: string }[] {
+  // Each fake word is 0.4s long, contiguous starting at startSec.
+  return Array.from({ length: count }, (_, i) => ({
+    start: startSec + i * 0.4,
+    end: startSec + (i + 1) * 0.4,
+    text: `w${i}`,
+  }));
+}
+
+describe('planChunks', () => {
+  it('returns a single chunk when word count is below the threshold', () => {
+    const words = fakeWords(1500);
+    const plan = planChunks(words, { threshold: 4000, chunkSize: 2500, overlap: 300 });
+    expect(plan.chunks).toHaveLength(1);
+    expect(plan.needsRerank).toBe(false);
+    expect(plan.chunks[0]!.words).toHaveLength(1500);
+    expect(plan.chunks[0]!.startSec).toBe(0);
+    expect(plan.chunks[0]!.endSec).toBeCloseTo(1500 * 0.4);
+  });
+
+  it('splits words into overlapping chunks when above threshold', () => {
+    const words = fakeWords(7000);
+    const plan = planChunks(words, { threshold: 4000, chunkSize: 2500, overlap: 300 });
+    expect(plan.needsRerank).toBe(true);
+    // 7000 words at 2500-step with 300 overlap → starts at 0, 2200, 4400, 6600 (last is short)
+    expect(plan.chunks).toHaveLength(4);
+    expect(plan.chunks[0]!.words[0]!.text).toBe('w0');
+    expect(plan.chunks[1]!.words[0]!.text).toBe('w2200');
+    expect(plan.chunks[2]!.words[0]!.text).toBe('w4400');
+    expect(plan.chunks[3]!.words[0]!.text).toBe('w6600');
+  });
+
+  it('chunk start/end seconds match the wrapped word range', () => {
+    const words = fakeWords(7000);
+    const plan = planChunks(words, { threshold: 4000, chunkSize: 2500, overlap: 300 });
+    expect(plan.chunks[1]!.startSec).toBeCloseTo(2200 * 0.4);
+    expect(plan.chunks[1]!.endSec).toBeCloseTo(Math.min(2200 + 2500, 7000) * 0.4);
+  });
+
+  it('returns an empty chunk list when given no words', () => {
+    const plan = planChunks([], { threshold: 4000, chunkSize: 2500, overlap: 300 });
+    expect(plan.chunks).toHaveLength(0);
+    expect(plan.needsRerank).toBe(false);
+  });
+
+  it('clamps overlap so that chunk step is always positive', () => {
+    // overlap >= chunkSize would loop forever — planner should guard.
+    expect(() => planChunks(fakeWords(5000), { threshold: 1, chunkSize: 100, overlap: 100 })).toThrow(
+      /overlap must be smaller than chunkSize/i,
+    );
+  });
+});
+```
+
+- [ ] **Step 2: Run — should fail**
+
+```bash
+yarn test src/main/services/ChunkPlanner.test.ts
+```
+
+Expected: cannot find ChunkPlanner module.
+
+- [ ] **Step 3: Implement `src/main/services/ChunkPlanner.ts`**
+
+```ts
+import type { Word } from '@shared/transcript';
+
+export interface ChunkPlannerOptions {
+  /** Above this word count, split into multiple chunks + final rerank. */
+  threshold: number;
+  /** Words per chunk when splitting. */
+  chunkSize: number;
+  /**
+   * Overlap (in words) between adjacent chunks. Helps the LLM not chop a
+   * highlight in half at a chunk boundary.
+   */
+  overlap: number;
+}
+
+export interface ChunkPlan {
+  /** Whether the orchestrator needs a final rerank LLM call. */
+  needsRerank: boolean;
+  chunks: ChunkRange[];
+}
+
+export interface ChunkRange {
+  /** 1-based index, useful for progress reporting. */
+  index: number;
+  /** Slice of the source words array (start..end exclusive). */
+  words: Word[];
+  /** Convenience: first word's start time (seconds). */
+  startSec: number;
+  /** Convenience: last word's end time (seconds). */
+  endSec: number;
+}
+
+/**
+ * Decides how to feed a transcript word list to the LLM.
+ *
+ * - If `words.length < threshold`, returns one chunk and skips the rerank step.
+ * - Otherwise, walks the word array in `chunkSize` windows that step forward
+ *   by `chunkSize - overlap` each iteration, so adjacent chunks overlap by
+ *   `overlap` words.
+ *
+ * Pure function — no IO, no side effects.
+ */
+export function planChunks(words: Word[], opts: ChunkPlannerOptions): ChunkPlan {
+  if (opts.overlap >= opts.chunkSize) {
+    throw new Error(
+      `ChunkPlanner: overlap (${opts.overlap}) must be smaller than chunkSize (${opts.chunkSize})`,
+    );
+  }
+  if (words.length === 0) return { needsRerank: false, chunks: [] };
+  if (words.length < opts.threshold) {
+    return {
+      needsRerank: false,
+      chunks: [
+        {
+          index: 1,
+          words,
+          startSec: words[0]!.start,
+          endSec: words[words.length - 1]!.end,
+        },
+      ],
+    };
+  }
+  const step = opts.chunkSize - opts.overlap;
+  const chunks: ChunkRange[] = [];
+  let i = 0;
+  while (i < words.length) {
+    const slice = words.slice(i, i + opts.chunkSize);
+    if (slice.length === 0) break;
+    chunks.push({
+      index: chunks.length + 1,
+      words: slice,
+      startSec: slice[0]!.start,
+      endSec: slice[slice.length - 1]!.end,
+    });
+    i += step;
+  }
+  return { needsRerank: true, chunks };
+}
+```
+
+- [ ] **Step 4: Run — should pass 5/5**
+
+```bash
+yarn test src/main/services/ChunkPlanner.test.ts
+```
+
+- [ ] **Step 5: Format + commit**
+
+```bash
+yarn prettier --write src/main/services/ChunkPlanner.ts src/main/services/ChunkPlanner.test.ts
+git add src/main/services/ChunkPlanner.ts src/main/services/ChunkPlanner.test.ts
+git commit -m "feat(m5): add ChunkPlanner pure word-window planner"
+```
+
+---
+
+### Task 5: OpenRouterClient (TDD with mocked SDK)
+
+**Files:**
+- Create: `src/main/infra/OpenRouterClient.ts`
+- Create: `src/main/infra/OpenRouterClient.test.ts`
+
+`OpenRouterClient` wraps the openai SDK so HighlightService tests can swap a fake client. It exposes one method: `chatJson(opts)` that returns `Promise<unknown>` (raw parsed JSON) — schema validation happens in HighlightService.
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `src/main/infra/OpenRouterClient.test.ts`:
+
+```ts
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { OpenRouterClient } from './OpenRouterClient';
+
+describe('OpenRouterClient', () => {
+  let createCompletion: ReturnType<typeof vi.fn>;
+  let openaiCtor: ReturnType<typeof vi.fn>;
+  let client: OpenRouterClient;
+
+  beforeEach(() => {
+    createCompletion = vi.fn();
+    openaiCtor = vi.fn(() => ({
+      chat: { completions: { create: createCompletion } },
+    }));
+    client = new OpenRouterClient({ openaiCtor: openaiCtor as never });
+  });
+
+  it('constructs the SDK with OpenRouter baseURL and the provided key', async () => {
+    createCompletion.mockResolvedValue({
+      choices: [{ message: { content: '{"highlights":[]}' } }],
+    });
+    await client.chatJson({
+      apiKey: 'sk-or-v1-abc',
+      model: 'anthropic/claude-sonnet-4.5',
+      systemPrompt: 'sys',
+      userPrompt: 'user',
+    });
+    expect(openaiCtor).toHaveBeenCalledTimes(1);
+    const args = openaiCtor.mock.calls[0]![0];
+    expect(args.apiKey).toBe('sk-or-v1-abc');
+    expect(args.baseURL).toBe('https://openrouter.ai/api/v1');
+  });
+
+  it('sends a chat completion with response_format json_object and returns parsed JSON', async () => {
+    createCompletion.mockResolvedValue({
+      choices: [{ message: { content: '{"highlights":[{"start_sec":0,"end_sec":5,"title":"t","hook":"h"}]}' } }],
+    });
+    const result = await client.chatJson({
+      apiKey: 'k',
+      model: 'm',
+      systemPrompt: 'sys',
+      userPrompt: 'user',
+    });
+    expect(createCompletion).toHaveBeenCalledTimes(1);
+    const opts = createCompletion.mock.calls[0]![0];
+    expect(opts.model).toBe('m');
+    expect(opts.response_format).toEqual({ type: 'json_object' });
+    expect(opts.messages).toEqual([
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'user' },
+    ]);
+    expect(result).toEqual({
+      highlights: [{ start_sec: 0, end_sec: 5, title: 't', hook: 'h' }],
+    });
+  });
+
+  it('forwards an AbortSignal to the SDK call', async () => {
+    createCompletion.mockResolvedValue({ choices: [{ message: { content: '{}' } }] });
+    const controller = new AbortController();
+    await client.chatJson({
+      apiKey: 'k',
+      model: 'm',
+      systemPrompt: 's',
+      userPrompt: 'u',
+      signal: controller.signal,
+    });
+    const opts = createCompletion.mock.calls[0]![1];
+    expect(opts.signal).toBe(controller.signal);
+  });
+
+  it('throws a descriptive error when the response has no choices', async () => {
+    createCompletion.mockResolvedValue({ choices: [] });
+    await expect(
+      client.chatJson({ apiKey: 'k', model: 'm', systemPrompt: 's', userPrompt: 'u' }),
+    ).rejects.toThrow(/no choices/i);
+  });
+
+  it('throws when the message content is not valid JSON', async () => {
+    createCompletion.mockResolvedValue({
+      choices: [{ message: { content: 'not json at all' } }],
+    });
+    await expect(
+      client.chatJson({ apiKey: 'k', model: 'm', systemPrompt: 's', userPrompt: 'u' }),
+    ).rejects.toThrow(/json/i);
+  });
+
+  it('caches the SDK instance per apiKey (does not reconstruct on identical key)', async () => {
+    createCompletion.mockResolvedValue({ choices: [{ message: { content: '{}' } }] });
+    await client.chatJson({ apiKey: 'k1', model: 'm', systemPrompt: 's', userPrompt: 'u' });
+    await client.chatJson({ apiKey: 'k1', model: 'm', systemPrompt: 's', userPrompt: 'u' });
+    expect(openaiCtor).toHaveBeenCalledTimes(1);
+    await client.chatJson({ apiKey: 'k2', model: 'm', systemPrompt: 's', userPrompt: 'u' });
+    expect(openaiCtor).toHaveBeenCalledTimes(2);
+  });
+});
+```
+
+- [ ] **Step 2: Run — should fail**
+
+```bash
+yarn test src/main/infra/OpenRouterClient.test.ts
+```
+
+- [ ] **Step 3: Implement `src/main/infra/OpenRouterClient.ts`**
+
+```ts
+import OpenAI from 'openai';
+
+export type OpenAICtor = new (opts: { apiKey: string; baseURL: string }) => {
+  chat: {
+    completions: {
+      create: (
+        body: {
+          model: string;
+          messages: { role: 'system' | 'user'; content: string }[];
+          response_format: { type: 'json_object' };
+          temperature?: number;
+        },
+        opts?: { signal?: AbortSignal },
+      ) => Promise<{ choices: { message: { content: string | null } }[] }>;
+    };
+  };
+};
+
+export interface OpenRouterClientOptions {
+  /** Override for tests. Defaults to the real OpenAI SDK constructor. */
+  openaiCtor?: OpenAICtor;
+}
+
+export interface ChatJsonOptions {
+  apiKey: string;
+  model: string;
+  systemPrompt: string;
+  userPrompt: string;
+  /** 0..2; lower = more deterministic. Default 0.4. */
+  temperature?: number;
+  signal?: AbortSignal;
+}
+
+const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+
+/**
+ * Thin wrapper around the openai SDK used against OpenRouter's
+ * OpenAI-compatible endpoint. Exposes a single `chatJson` method that returns
+ * the parsed JSON content of the first choice. Schema validation is the
+ * caller's responsibility — this layer only knows about transport + parsing.
+ *
+ * Caches the SDK instance per `apiKey` so repeated calls don't re-construct
+ * the underlying HTTP client.
+ */
+export class OpenRouterClient {
+  private readonly ctor: OpenAICtor;
+  private readonly cache = new Map<string, InstanceType<OpenAICtor>>();
+
+  constructor(opts: OpenRouterClientOptions = {}) {
+    this.ctor = opts.openaiCtor ?? (OpenAI as unknown as OpenAICtor);
+  }
+
+  async chatJson(opts: ChatJsonOptions): Promise<unknown> {
+    const sdk = this.getSdk(opts.apiKey);
+    const resp = await sdk.chat.completions.create(
+      {
+        model: opts.model,
+        messages: [
+          { role: 'system', content: opts.systemPrompt },
+          { role: 'user', content: opts.userPrompt },
+        ],
+        response_format: { type: 'json_object' },
+        temperature: opts.temperature ?? 0.4,
+      },
+      { signal: opts.signal },
+    );
+    if (!resp.choices || resp.choices.length === 0) {
+      throw new Error('OpenRouter response had no choices');
+    }
+    const content = resp.choices[0]!.message.content;
+    if (!content) {
+      throw new Error('OpenRouter response had empty content');
+    }
+    try {
+      return JSON.parse(content);
+    } catch (e) {
+      throw new Error(`OpenRouter returned non-JSON content: ${(e as Error).message}`);
+    }
+  }
+
+  private getSdk(apiKey: string): InstanceType<OpenAICtor> {
+    const cached = this.cache.get(apiKey);
+    if (cached) return cached;
+    const sdk = new this.ctor({ apiKey, baseURL: OPENROUTER_BASE_URL });
+    this.cache.set(apiKey, sdk);
+    return sdk;
+  }
+}
+```
+
+- [ ] **Step 4: Run — should pass 6/6**
+
+```bash
+yarn test src/main/infra/OpenRouterClient.test.ts
+```
+
+- [ ] **Step 5: Format + commit**
+
+```bash
+yarn prettier --write src/main/infra/OpenRouterClient.ts src/main/infra/OpenRouterClient.test.ts
+git add src/main/infra/OpenRouterClient.ts src/main/infra/OpenRouterClient.test.ts
+git commit -m "feat(m5): add OpenRouterClient SDK wrapper with json_object response_format"
+```
+
+---
+
+### Task 6: HighlightService (TDD with mocked OpenRouterClient)
+
+**Files:**
+- Create: `src/main/services/HighlightService.ts`
+- Create: `src/main/services/HighlightService.test.ts`
+
+The service:
+1. Takes a transcript + options (model, count, min/max sec, api key).
+2. Asks `ChunkPlanner.planChunks` for a chunk plan.
+3. For each chunk, calls `OpenRouterClient.chatJson` with the per-chunk prompt; validates result with zod.
+4. If `needsRerank`, makes one final call passing all candidates; final response is the chosen N highlights.
+5. Returns a `HighlightSet` with metadata (model, generatedAt, audioPath).
+6. Subscribes can listen to per-chunk progress via an `onProgress` handler.
+7. `cancel()` aborts the in-flight request via AbortController.
+
+- [ ] **Step 1: Write the failing tests**
+
+Create `src/main/services/HighlightService.test.ts`:
+
+```ts
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { Transcript } from '@shared/transcript';
+import { HighlightService } from './HighlightService';
+
+function makeTranscript(wordCount: number): Transcript {
+  return {
+    duration: wordCount * 0.4,
+    language: 'en',
+    segments: [],
+    words: Array.from({ length: wordCount }, (_, i) => ({
+      start: i * 0.4,
+      end: (i + 1) * 0.4,
+      text: `w${i}`,
+    })),
+  };
+}
+
+const validResponse = {
+  highlights: [
+    { start_sec: 0, end_sec: 30, title: 'Opener', hook: 'It starts strong' },
+    { start_sec: 60, end_sec: 90, title: 'Middle', hook: 'Big reveal' },
+  ],
+};
+
+describe('HighlightService', () => {
+  let chatJson: ReturnType<typeof vi.fn>;
+  let client: { chatJson: typeof chatJson };
+  let service: HighlightService;
+
+  beforeEach(() => {
+    chatJson = vi.fn();
+    client = { chatJson };
+    service = new HighlightService(client as never);
+  });
+
+  it('makes one LLM call for short transcripts (no rerank)', async () => {
+    chatJson.mockResolvedValue(validResponse);
+    const transcript = makeTranscript(1500); // below threshold
+    const result = await service.extract({
+      transcript,
+      audioPath: '/x.mp4',
+      apiKey: 'k',
+      model: 'm',
+      count: 2,
+      minSec: 20,
+      maxSec: 60,
+    });
+    expect(chatJson).toHaveBeenCalledTimes(1);
+    expect(result.highlights).toHaveLength(2);
+    expect(result.model).toBe('m');
+    expect(result.audioPath).toBe('/x.mp4');
+    expect(result.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('chunks long transcripts and runs a final rerank call', async () => {
+    chatJson
+      .mockResolvedValueOnce(validResponse) // chunk 1
+      .mockResolvedValueOnce(validResponse) // chunk 2
+      .mockResolvedValueOnce(validResponse) // chunk 3
+      .mockResolvedValueOnce(validResponse); // rerank
+    const transcript = makeTranscript(7000);
+    const result = await service.extract({
+      transcript,
+      audioPath: '/x.mp4',
+      apiKey: 'k',
+      model: 'm',
+      count: 2,
+      minSec: 20,
+      maxSec: 60,
+    });
+    // 7000 words at chunkSize=2500 step=2200 → 4 chunks; +1 rerank = 5
+    expect(chatJson).toHaveBeenCalledTimes(5);
+    expect(result.highlights).toHaveLength(2);
+  });
+
+  it('emits progress per chunk and once for rerank', async () => {
+    chatJson.mockResolvedValue(validResponse);
+    const transcript = makeTranscript(5000);
+    const events: { chunkIndex: number; chunkTotal: number; phase: string }[] = [];
+    service.onProgress((p) => events.push(p));
+    await service.extract({
+      transcript,
+      audioPath: '/x.mp4',
+      apiKey: 'k',
+      model: 'm',
+      count: 2,
+      minSec: 20,
+      maxSec: 60,
+    });
+    // 5000 words → 3 chunks (0, 2200, 4400) + 1 rerank
+    expect(events.length).toBe(4);
+    expect(events[0]).toMatchObject({ chunkIndex: 1, chunkTotal: 3, phase: 'chunk' });
+    expect(events[3]).toMatchObject({ chunkIndex: 1, chunkTotal: 1, phase: 'rerank' });
+  });
+
+  it('throws MissingApiKeyError when apiKey is empty', async () => {
+    await expect(
+      service.extract({
+        transcript: makeTranscript(100),
+        audioPath: '/x.mp4',
+        apiKey: '',
+        model: 'm',
+        count: 2,
+        minSec: 20,
+        maxSec: 60,
+      }),
+    ).rejects.toThrow(/OpenRouter API key is not set/i);
+    expect(chatJson).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the LLM returns a malformed payload', async () => {
+    chatJson.mockResolvedValue({ highlights: [{ start_sec: 'not a number' }] });
+    await expect(
+      service.extract({
+        transcript: makeTranscript(100),
+        audioPath: '/x.mp4',
+        apiKey: 'k',
+        model: 'm',
+        count: 2,
+        minSec: 20,
+        maxSec: 60,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('cancel() aborts in-flight LLM calls', async () => {
+    let abortedSignal: AbortSignal | null = null;
+    chatJson.mockImplementation(
+      (opts: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          abortedSignal = opts.signal ?? null;
+          opts.signal?.addEventListener('abort', () => {
+            reject(new Error('AbortError: aborted by caller'));
+          });
+        }),
+    );
+    const promise = service.extract({
+      transcript: makeTranscript(100),
+      audioPath: '/x.mp4',
+      apiKey: 'k',
+      model: 'm',
+      count: 2,
+      minSec: 20,
+      maxSec: 60,
+    });
+    // Wait for the call to start
+    await new Promise((r) => setTimeout(r, 0));
+    service.cancel();
+    await expect(promise).rejects.toThrow(/abort/i);
+    expect(abortedSignal).not.toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: Run — should fail**
+
+```bash
+yarn test src/main/services/HighlightService.test.ts
+```
+
+- [ ] **Step 3: Implement `src/main/services/HighlightService.ts`**
+
+```ts
+import { type ExtractProgress } from '@shared/extract';
+import { type Highlight, HighlightSchema, type HighlightSet } from '@shared/highlight';
+import { type Transcript } from '@shared/transcript';
+import { z } from 'zod';
+
+import { planChunks } from './ChunkPlanner';
+
+interface ClientLike {
+  chatJson(opts: {
+    apiKey: string;
+    model: string;
+    systemPrompt: string;
+    userPrompt: string;
+    temperature?: number;
+    signal?: AbortSignal;
+  }): Promise<unknown>;
+}
+
+export interface ExtractOptions {
+  transcript: Transcript;
+  audioPath: string;
+  apiKey: string;
+  model: string;
+  /** How many highlights the LLM should return. */
+  count: number;
+  minSec: number;
+  maxSec: number;
+}
+
+type ProgressHandler = (p: ExtractProgress) => void;
+
+const ResponseSchema = z.object({ highlights: z.array(HighlightSchema) });
+
+const SYSTEM_PROMPT = (count: number, minSec: number, maxSec: number) =>
+  `당신은 짧은 영상 편집자다. 아래 단어 단위 타임스탬프 트랜스크립트를 분석해서 시청자를 끌어당길 ${count}개의 하이라이트를 골라라. 각 하이라이트는 ${minSec}초 ~ ${maxSec}초 사이여야 한다. 응답은 다음 JSON 스키마를 정확히 따른다: {"highlights":[{"start_sec":number,"end_sec":number,"title":string,"hook":string}]}. 다른 어떤 텍스트도 포함하지 말고 JSON만 반환하라.`;
+
+const RERANK_PROMPT = (count: number, minSec: number, maxSec: number) =>
+  `당신은 짧은 영상 편집자다. 아래는 같은 영상의 여러 구간에서 뽑힌 하이라이트 후보들이다. 이 중에서 시청자를 가장 끌어당길 ${count}개를 최종 선택하라. 각 하이라이트는 ${minSec}초 ~ ${maxSec}초 사이여야 한다. 동일한 JSON 스키마를 따른다.`;
+
+/**
+ * Orchestrates LLM-based highlight extraction.
+ *
+ * - Single-call path for transcripts under `THRESHOLD` words.
+ * - Chunked path with a final rerank call for longer transcripts.
+ * - `cancel()` triggers an AbortController that propagates to the in-flight
+ *   LLM HTTP request via the openai SDK signal.
+ */
+export class HighlightService {
+  private static readonly THRESHOLD = 4000;
+  private static readonly CHUNK_SIZE = 2500;
+  private static readonly OVERLAP = 300;
+
+  private progressHandlers: ProgressHandler[] = [];
+  private abortController: AbortController | null = null;
+
+  constructor(private readonly client: ClientLike) {}
+
+  onProgress(handler: ProgressHandler): () => void {
+    this.progressHandlers.push(handler);
+    return () => {
+      this.progressHandlers = this.progressHandlers.filter((h) => h !== handler);
+    };
+  }
+
+  cancel(): void {
+    this.abortController?.abort();
+  }
+
+  async extract(opts: ExtractOptions): Promise<HighlightSet> {
+    if (!opts.apiKey) {
+      throw new Error('OpenRouter API key is not set');
+    }
+    this.abortController = new AbortController();
+    const signal = this.abortController.signal;
+
+    try {
+      const plan = planChunks(opts.transcript.words, {
+        threshold: HighlightService.THRESHOLD,
+        chunkSize: HighlightService.CHUNK_SIZE,
+        overlap: HighlightService.OVERLAP,
+      });
+      const sysChunk = SYSTEM_PROMPT(opts.count, opts.minSec, opts.maxSec);
+      const candidates: Highlight[] = [];
+      for (const chunk of plan.chunks) {
+        this.emitProgress({
+          jobId: opts.audioPath,
+          chunkIndex: chunk.index,
+          chunkTotal: plan.chunks.length,
+          phase: 'chunk',
+        });
+        const userPrompt = formatChunkPrompt(chunk.words, chunk.startSec, chunk.endSec);
+        const raw = await this.client.chatJson({
+          apiKey: opts.apiKey,
+          model: opts.model,
+          systemPrompt: sysChunk,
+          userPrompt,
+          signal,
+        });
+        const parsed = ResponseSchema.parse(raw);
+        candidates.push(...parsed.highlights);
+      }
+
+      let finalHighlights: Highlight[];
+      if (plan.needsRerank) {
+        this.emitProgress({
+          jobId: opts.audioPath,
+          chunkIndex: 1,
+          chunkTotal: 1,
+          phase: 'rerank',
+        });
+        const sysRerank = RERANK_PROMPT(opts.count, opts.minSec, opts.maxSec);
+        const userPrompt = `다음은 후보 목록이다 (JSON):\n${JSON.stringify({ candidates }, null, 2)}`;
+        const raw = await this.client.chatJson({
+          apiKey: opts.apiKey,
+          model: opts.model,
+          systemPrompt: sysRerank,
+          userPrompt,
+          temperature: 0.2,
+          signal,
+        });
+        finalHighlights = ResponseSchema.parse(raw).highlights;
+      } else {
+        finalHighlights = candidates;
+      }
+
+      return {
+        generatedAt: new Date().toISOString(),
+        model: opts.model,
+        audioPath: opts.audioPath,
+        highlights: finalHighlights,
+      };
+    } finally {
+      this.abortController = null;
+    }
+  }
+
+  private emitProgress(p: ExtractProgress): void {
+    for (const h of this.progressHandlers) h(p);
+  }
+}
+
+function formatChunkPrompt(
+  words: { start: number; end: number; text: string }[],
+  startSec: number,
+  endSec: number,
+): string {
+  const wordLines = words.map((w) => `[${w.start.toFixed(2)}-${w.end.toFixed(2)}] ${w.text}`).join('\n');
+  return `구간: ${startSec.toFixed(2)}s - ${endSec.toFixed(2)}s\n\n트랜스크립트 (단어 단위):\n${wordLines}`;
+}
+```
+
+- [ ] **Step 4: Run — should pass 6/6**
+
+```bash
+yarn test src/main/services/HighlightService.test.ts
+```
+
+- [ ] **Step 5: Format + commit**
+
+```bash
+yarn prettier --write src/main/services/HighlightService.ts src/main/services/HighlightService.test.ts
+git add src/main/services/HighlightService.ts src/main/services/HighlightService.test.ts
+git commit -m "feat(m5): add HighlightService with chunking, rerank, and cancel"
+```
+
+---
+
+### Task 7: Wire IPC handlers in main.ts
+
+**Files:**
+- Modify: `src/main/main.ts`
+
+The handler:
+1. Reads the existing transcript from `<audioPath>.transcript.json`.
+2. Reads current settings (LLM model + shorts.defaultCount/minSec/maxSec).
+3. Reads the OpenRouter API key from SecureStorage.
+4. If key missing → throws `Error('OpenRouter API key is not set')` (renderer maps this to the missing-key state).
+5. Calls `highlightService.extract(...)`.
+6. Writes the result to `<audioPath>.highlights.json`.
+7. Returns `{ highlightsPath, highlightSet }`.
+
+Progress events bubble from the service to the renderer via `webContents.send('extract:progress', ...)`.
+
+- [ ] **Step 1: Add imports**
+
+In `src/main/main.ts`, add after the existing relative imports:
+
+```ts
+import { HighlightService } from './services/HighlightService';
+import { OpenRouterClient } from './infra/OpenRouterClient';
+```
+
+- [ ] **Step 2: Add module-level state**
+
+After the existing `let transcribeProgressUnsub: (() => void) | null = null;` line, add:
+
+```ts
+let openRouterClient: OpenRouterClient | null = null;
+let highlightService: HighlightService | null = null;
+let extractProgressUnsub: (() => void) | null = null;
+```
+
+- [ ] **Step 3: Add the lazy getter helper**
+
+Insert ABOVE `void app.whenReady().then(() => {`:
+
+```ts
+function getHighlightService(): HighlightService {
+  if (highlightService) return highlightService;
+  openRouterClient = new OpenRouterClient();
+  highlightService = new HighlightService(openRouterClient);
+  extractProgressUnsub = highlightService.onProgress((p) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('extract:progress', p);
+    }
+  });
+  return highlightService;
+}
+```
+
+- [ ] **Step 4: Register IPC handlers**
+
+Inside `app.whenReady().then(() => { ... })`, after the existing `shell:openPath` handler and BEFORE `createMainWindow();`, add:
+
+```ts
+ipcMain.handle('extract:run', async (_e, audioPath: string) => {
+  const apiKey = await secureStorage.getKey();
+  if (!apiKey) {
+    throw new Error('OpenRouter API key is not set');
+  }
+  const transcriptPath = `${audioPath}.transcript.json`;
+  const transcriptRaw = await fsPromises.readFile(transcriptPath, 'utf8');
+  const transcript = JSON.parse(transcriptRaw);
+
+  const service = getHighlightService();
+  const settings = settingsStore.get();
+  const highlightSet = await service.extract({
+    transcript,
+    audioPath,
+    apiKey,
+    model: settings.llm.model,
+    count: settings.shorts.defaultCount,
+    minSec: settings.shorts.minSec,
+    maxSec: settings.shorts.maxSec,
+  });
+  const highlightsPath = `${audioPath}.highlights.json`;
+  await fsPromises.writeFile(highlightsPath, JSON.stringify(highlightSet, null, 2), 'utf8');
+  return { highlightsPath, highlightSet };
+});
+
+ipcMain.handle('extract:cancel', () => {
+  highlightService?.cancel();
+});
+```
+
+> NOTE: `secureStorage.getKey()` may not exist yet — the M2 SecureStorage exposed `hasKey/setKey/clearKey` only. Check `src/main/infra/SecureStorage.ts` first. If the only read method is internal, add a public `getKey(): Promise<string | null>` method now (small additive change, no schema impact). Tests for SecureStorage live in `src/main/infra/SecureStorage.test.ts` — extend them with one test for the new method:
+>
+> ```ts
+> it('getKey returns null when no key has been stored', async () => {
+>   const storage = new SecureStorage(/* paths from existing test */);
+>   await expect(storage.getKey()).resolves.toBeNull();
+> });
+>
+> it('getKey returns the stored key after setKey', async () => {
+>   const storage = new SecureStorage(/* paths */);
+>   await storage.setKey('abc');
+>   await expect(storage.getKey()).resolves.toBe('abc');
+> });
+> ```
+>
+> If the existing tests use a different setup pattern, adapt accordingly. Add and commit the SecureStorage extension as part of this task.
+
+- [ ] **Step 5: Cleanup in window-all-closed**
+
+Update the existing `app.on('window-all-closed', ...)` block. Find:
+
+```ts
+app.on('window-all-closed', () => {
+  transcribeProgressUnsub?.();
+  transcribeProgressUnsub = null;
+  pythonSidecar?.shutdown();
+  pythonSidecar = null;
+  transcribeService = null;
+  if (process.platform !== 'darwin') app.quit();
+});
+```
+
+Add the highlight cleanup before `if (process.platform...)`:
+
+```ts
+  extractProgressUnsub?.();
+  extractProgressUnsub = null;
+  highlightService?.cancel();
+  highlightService = null;
+  openRouterClient = null;
+```
+
+- [ ] **Step 6: Format + typecheck**
+
+```bash
+yarn prettier --write src/main/main.ts src/main/infra/SecureStorage.ts src/main/infra/SecureStorage.test.ts
+yarn typecheck
+```
+
+Expected: typecheck STILL fails at preload + tests/renderer (tasks 8 fixes that). Errors in main.ts itself or SecureStorage are real bugs — fix before committing.
+
+Run the SecureStorage tests separately to confirm the new method works:
+
+```bash
+yarn test src/main/infra/SecureStorage.test.ts
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/main/main.ts src/main/infra/SecureStorage.ts src/main/infra/SecureStorage.test.ts
+git commit -m "feat(m5): wire extract IPC + lazy highlight service + persist highlights.json"
+```
+
+---
+
+### Task 8: Update preload bridge + test stubs
+
+**Files:**
+- Modify: `src/main/preload.ts`
+- Modify: `tests/renderer/App.test.tsx`
+- Modify: `tests/renderer/Settings.test.tsx`
+- Modify: `tests/renderer/NewJob.test.tsx`
+
+- [ ] **Step 1: Add the 3 new methods to preload**
+
+Edit `src/main/preload.ts`. Add this import alongside the existing type imports:
+
+```ts
+import type { ExtractProgress } from '@shared/extract';
+```
+
+Add these properties to the `api` object literal, alongside the transcribe block:
+
+```ts
+  extractHighlights: (audioPath: string) => ipcRenderer.invoke('extract:run', audioPath),
+  cancelExtract: () => ipcRenderer.invoke('extract:cancel'),
+  onExtractProgress: (callback: (p: ExtractProgress) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, data: ExtractProgress) => callback(data);
+    ipcRenderer.on('extract:progress', handler);
+    return () => {
+      ipcRenderer.off('extract:progress', handler);
+    };
+  },
+```
+
+- [ ] **Step 2: Format + lint + typecheck**
+
+```bash
+yarn prettier --write src/main/preload.ts
+yarn lint && yarn typecheck
+```
+
+Expected: lint 0 errors (1 known warning OK), typecheck 0 errors. Tests will still fail until step 3.
+
+- [ ] **Step 3: Update test stubs**
+
+In each of `tests/renderer/App.test.tsx`, `tests/renderer/Settings.test.tsx`, `tests/renderer/NewJob.test.tsx`, find the api mock object and add these 3 stub properties (keep them next to the existing transcribe stubs):
+
+```ts
+extractHighlights: vi.fn(async () => ({
+  highlightsPath: '/tmp/x.highlights.json',
+  highlightSet: { generatedAt: '2026-05-09T00:00:00Z', model: 'm', audioPath: '/tmp/x', highlights: [] },
+})),
+cancelExtract: vi.fn(async () => undefined),
+onExtractProgress: vi.fn(() => () => undefined),
+```
+
+- [ ] **Step 4: Run tests**
+
+```bash
+yarn test
+```
+
+Expected: all tests pass (current count from end of M4 = 73; this task adds 0 new tests but unblocks the typecheck → tests should run cleanly to 73 again).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/main/preload.ts tests/renderer/App.test.tsx tests/renderer/Settings.test.tsx tests/renderer/NewJob.test.tsx
+git commit -m "feat(m5): expose extractHighlights/cancelExtract/onExtractProgress on window.api and update test stubs"
+```
+
+---
+
+### Task 9: useHighlights hook
+
+**Files:**
+- Create: `src/renderer/hooks/useHighlights.ts`
+
+The hook owns the state machine + proactively probes for the API key on mount so the UI can show a `missing-key` state without the user having to click into a guaranteed failure.
+
+- [ ] **Step 1: Create `src/renderer/hooks/useHighlights.ts`**
+
+```ts
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import type { ExtractProgress, ExtractStatus } from '@shared/extract';
+import type { HighlightSet } from '@shared/highlight';
+
+export type HighlightState =
+  | { status: 'probing' }
+  | { status: 'missing-key' }
+  | { status: 'idle' }
+  | { status: 'extracting'; audioPath: string; progress: ExtractProgress | null }
+  | { status: 'done'; audioPath: string; highlightsPath: string; highlightSet: HighlightSet }
+  | { status: 'canceled'; audioPath: string }
+  | { status: 'error'; audioPath: string; error: Error };
+
+export type UseHighlights = {
+  state: HighlightState;
+  status: ExtractStatus | 'probing';
+  start: (audioPath: string) => Promise<void>;
+  cancel: () => Promise<void>;
+  reset: () => void;
+  /** Re-probe the API key (call after the user updates settings). */
+  refreshKeyStatus: () => Promise<void>;
+};
+
+export function useHighlights(): UseHighlights {
+  const [state, setState] = useState<HighlightState>({ status: 'probing' });
+  const abortRef = useRef(false);
+
+  const refreshKeyStatus = useCallback(async () => {
+    const hasKey = await window.api.hasApiKey();
+    setState((current) => {
+      if (current.status === 'probing' || current.status === 'missing-key' || current.status === 'idle') {
+        return hasKey ? { status: 'idle' } : { status: 'missing-key' };
+      }
+      return current;
+    });
+  }, []);
+
+  useEffect(() => {
+    void refreshKeyStatus();
+  }, [refreshKeyStatus]);
+
+  useEffect(() => {
+    const unsubscribe = window.api.onExtractProgress((p) => {
+      setState((current) => {
+        if (current.status === 'extracting') {
+          return { status: 'extracting', audioPath: current.audioPath, progress: p };
+        }
+        return current;
+      });
+    });
+    return unsubscribe;
+  }, []);
+
+  const start = useCallback(async (audioPath: string) => {
+    abortRef.current = false;
+    setState({ status: 'extracting', audioPath, progress: null });
+    try {
+      const { highlightsPath, highlightSet } = await window.api.extractHighlights(audioPath);
+      if (abortRef.current) return;
+      setState({ status: 'done', audioPath, highlightsPath, highlightSet });
+    } catch (e: unknown) {
+      if (abortRef.current) return;
+      const message = e instanceof Error ? e.message : String(e);
+      if (/api key is not set/i.test(message)) {
+        setState({ status: 'missing-key' });
+        return;
+      }
+      if (/abort|canceled/i.test(message)) {
+        setState({ status: 'canceled', audioPath });
+        return;
+      }
+      setState({
+        status: 'error',
+        audioPath,
+        error: e instanceof Error ? e : new Error(message),
+      });
+    }
+  }, []);
+
+  const cancel = useCallback(async () => {
+    await window.api.cancelExtract();
+  }, []);
+
+  const reset = useCallback(() => {
+    abortRef.current = true;
+    void refreshKeyStatus().then(() => {
+      // refreshKeyStatus already sets state, nothing else to do
+    });
+  }, [refreshKeyStatus]);
+
+  return { state, status: state.status, start, cancel, reset, refreshKeyStatus };
+}
+```
+
+- [ ] **Step 2: Format + verify**
+
+```bash
+yarn prettier --write src/renderer/hooks/useHighlights.ts
+yarn lint && yarn typecheck && yarn test
+```
+
+Expected: all green.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/renderer/hooks/useHighlights.ts
+git commit -m "feat(m5): add useHighlights hook with API key probe and state machine"
+```
+
+---
+
+### Task 10: HighlightCard component
+
+**Files:**
+- Create: `src/renderer/components/newjob/HighlightCard.tsx`
+
+Six visual states. Layout follows the same Tailwind patterns as `TranscribeCard` and `DownloadProgress`.
+
+- [ ] **Step 1: Create the file**
+
+```tsx
+import type { ExtractProgress as Progress } from '@shared/extract';
+import type { Highlight, HighlightSet } from '@shared/highlight';
+
+function formatTime(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60)
+    .toString()
+    .padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+type Props =
+  | { status: 'probing' }
+  | { status: 'missing-key'; onOpenSettings: () => void }
+  | { status: 'idle'; onStart: () => void }
+  | { status: 'extracting'; progress: Progress | null; onCancel: () => void }
+  | {
+      status: 'done';
+      highlightsPath: string;
+      highlightSet: HighlightSet;
+      onOpenJson: () => void;
+      onReset: () => void;
+    }
+  | { status: 'canceled'; onReset: () => void }
+  | { status: 'error'; error: Error; onReset: () => void };
+
+export function HighlightCard(props: Props) {
+  return (
+    <section className="rounded-xl border border-hairline bg-canvas p-xxl shadow-1">
+      {props.status === 'probing' ? (
+        <p className="text-body-md text-slate">하이라이트 추출 준비 중...</p>
+      ) : null}
+
+      {props.status === 'missing-key' ? (
+        <div className="flex flex-col gap-md">
+          <h3 className="text-card-title font-semibold text-ink">하이라이트 추출</h3>
+          <p className="text-body-sm text-slate">
+            OpenRouter API 키가 설정되어 있지 않습니다. 설정 페이지에서 키를 등록한 뒤 다시 시도하세요.
+          </p>
+          <button
+            type="button"
+            onClick={props.onOpenSettings}
+            className="bg-primary px-xl text-button-md text-on-primary h-10 self-start rounded-full font-semibold"
+          >
+            설정으로 이동
+          </button>
+        </div>
+      ) : null}
+
+      {props.status === 'idle' ? (
+        <div className="flex flex-col gap-md">
+          <h3 className="text-card-title font-semibold text-ink">하이라이트 추출</h3>
+          <p className="text-body-sm text-slate">
+            전사된 텍스트를 LLM에 보내 시청자를 사로잡을 만한 구간을 자동으로 골라냅니다.
+          </p>
+          <button
+            type="button"
+            onClick={props.onStart}
+            className="bg-primary px-xl text-button-md text-on-primary h-10 self-start rounded-full font-semibold"
+          >
+            하이라이트 추출
+          </button>
+        </div>
+      ) : null}
+
+      {props.status === 'extracting' ? (
+        <div className="flex flex-col gap-md">
+          <h3 className="text-card-title font-semibold text-ink">
+            하이라이트 추출 중
+            {props.progress
+              ? ` (${props.progress.phase === 'rerank' ? '최종 선별' : `청크 ${props.progress.chunkIndex}/${props.progress.chunkTotal}`})`
+              : '...'}
+          </h3>
+          <button
+            type="button"
+            onClick={props.onCancel}
+            className="border-ink px-xl text-button-md text-ink h-10 self-start rounded-full border bg-transparent font-semibold"
+          >
+            취소
+          </button>
+        </div>
+      ) : null}
+
+      {props.status === 'done' ? (
+        <div className="flex flex-col gap-md">
+          <h3 className="text-card-title text-success-text font-semibold">
+            하이라이트 {props.highlightSet.highlights.length}개 추출 완료
+          </h3>
+          <ol className="gap-sm flex flex-col">
+            {props.highlightSet.highlights.map((h: Highlight, i: number) => (
+              <li key={i} className="bg-surface p-md rounded-lg">
+                <p className="text-body-md text-ink font-semibold">
+                  #{i + 1} {h.title}{' '}
+                  <span className="text-body-sm text-slate font-normal">
+                    ({formatTime(h.start_sec)} – {formatTime(h.end_sec)})
+                  </span>
+                </p>
+                <p className="text-body-sm text-slate mt-xs">{h.hook}</p>
+              </li>
+            ))}
+          </ol>
+          <p className="text-body-sm text-slate break-all">{props.highlightsPath}</p>
+          <div className="gap-sm flex">
+            <button
+              type="button"
+              onClick={props.onOpenJson}
+              className="bg-primary px-xl text-button-md text-on-primary h-10 rounded-full font-semibold"
+            >
+              JSON 열기
+            </button>
+            <button
+              type="button"
+              onClick={props.onReset}
+              className="border-ink px-xl text-button-md text-ink h-10 rounded-full border bg-transparent font-semibold"
+            >
+              다시 추출
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {props.status === 'canceled' ? (
+        <div className="flex flex-col gap-md">
+          <h3 className="text-card-title text-ink font-semibold">하이라이트 추출 취소됨</h3>
+          <button
+            type="button"
+            onClick={props.onReset}
+            className="bg-primary px-xl text-button-md text-on-primary h-10 self-start rounded-full font-semibold"
+          >
+            다시 시도
+          </button>
+        </div>
+      ) : null}
+
+      {props.status === 'error' ? (
+        <div className="flex flex-col gap-md">
+          <h3 className="text-card-title text-brand-coral font-semibold">하이라이트 추출 실패</h3>
+          <p className="text-body-sm text-slate break-all">{props.error.message}</p>
+          <button
+            type="button"
+            onClick={props.onReset}
+            className="bg-primary px-xl text-button-md text-on-primary h-10 self-start rounded-full font-semibold"
+          >
+            다시 시도
+          </button>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+```
+
+- [ ] **Step 2: Format + verify**
+
+```bash
+yarn prettier --write src/renderer/components/newjob/HighlightCard.tsx
+yarn lint && yarn typecheck
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/renderer/components/newjob/HighlightCard.tsx
+git commit -m "feat(m5): add HighlightCard with probing/missing-key/idle/extracting/done/canceled/error states"
+```
+
+---
+
+### Task 11: Compose HighlightCard into NewJob.tsx
+
+**Files:**
+- Modify: `src/renderer/pages/NewJob.tsx`
+
+After the existing `transcribe.state.status === 'done'` block, render the HighlightCard chain. The card pulls its own state from `useHighlights`. Pass `transcribe.state.transcript` ... no wait — we pass `download.state.outputPath` (the same audioPath used for transcribe; the IPC handler reads the sibling transcript.json).
+
+- [ ] **Step 1: Add imports and hook**
+
+In `src/renderer/pages/NewJob.tsx`, add to the imports (alphabetically):
+
+```tsx
+import { HighlightCard } from '@renderer/components/newjob/HighlightCard';
+import { useHighlights } from '@renderer/hooks/useHighlights';
+import { useNavigate } from 'react-router-dom';
+```
+
+Inside `NewJobPage`, just below `const transcribe = useTranscribe();`, add:
+
+```tsx
+const highlights = useHighlights();
+const navigate = useNavigate();
+```
+
+- [ ] **Step 2: Add the HighlightCard chain inside the existing `transcribe.state.status === 'done'` block**
+
+Find the existing transcribe `done` JSX:
+
+```tsx
+{transcribe.state.status === 'done' ? (
+  <TranscribeCard
+    status="done"
+    transcriptPath={transcribe.state.transcriptPath}
+    transcript={transcribe.state.transcript}
+    onOpen={() => {
+      if (transcribe.state.status === 'done') void window.api.openPath(transcribe.state.transcriptPath);
+    }}
+    onReset={() => transcribe.reset()}
+  />
+) : null}
+```
+
+Wrap this block + the new HighlightCard chain in a fragment so both render together:
+
+```tsx
+{transcribe.state.status === 'done' ? (
+  <>
+    <TranscribeCard
+      status="done"
+      transcriptPath={transcribe.state.transcriptPath}
+      transcript={transcribe.state.transcript}
+      onOpen={() => {
+        if (transcribe.state.status === 'done') void window.api.openPath(transcribe.state.transcriptPath);
+      }}
+      onReset={() => {
+        transcribe.reset();
+        highlights.reset();
+      }}
+    />
+    {highlights.state.status === 'probing' ? <HighlightCard status="probing" /> : null}
+    {highlights.state.status === 'missing-key' ? (
+      <HighlightCard status="missing-key" onOpenSettings={() => navigate('/settings')} />
+    ) : null}
+    {highlights.state.status === 'idle' ? (
+      <HighlightCard
+        status="idle"
+        onStart={() => {
+          if (transcribe.state.status === 'done') void highlights.start(transcribe.state.audioPath);
+        }}
+      />
+    ) : null}
+    {highlights.state.status === 'extracting' ? (
+      <HighlightCard
+        status="extracting"
+        progress={highlights.state.progress}
+        onCancel={() => void highlights.cancel()}
+      />
+    ) : null}
+    {highlights.state.status === 'done' ? (
+      <HighlightCard
+        status="done"
+        highlightsPath={highlights.state.highlightsPath}
+        highlightSet={highlights.state.highlightSet}
+        onOpenJson={() => {
+          if (highlights.state.status === 'done') void window.api.openPath(highlights.state.highlightsPath);
+        }}
+        onReset={() => highlights.reset()}
+      />
+    ) : null}
+    {highlights.state.status === 'canceled' ? (
+      <HighlightCard status="canceled" onReset={() => highlights.reset()} />
+    ) : null}
+    {highlights.state.status === 'error' ? (
+      <HighlightCard status="error" error={highlights.state.error} onReset={() => highlights.reset()} />
+    ) : null}
+  </>
+) : null}
+```
+
+- [ ] **Step 3: Format + verify**
+
+```bash
+yarn prettier --write src/renderer/pages/NewJob.tsx
+yarn lint && yarn typecheck && yarn test
+```
+
+Expected: all green; existing tests still pass.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/renderer/pages/NewJob.tsx
+git commit -m "feat(m5): render HighlightCard chain after transcribe completes"
+```
+
+---
+
+### Task 12: Smoke test for the highlight extract flow
+
+**Files:**
+- Modify: `tests/renderer/NewJob.test.tsx`
+
+Add tests that:
+1. Renders the missing-key state when `hasApiKey` returns false.
+2. Renders the idle state when `hasApiKey` returns true; clicking 하이라이트 추출 calls `extractHighlights`.
+
+To test these, the existing tests currently exercise the flow up to "다운로드 → 전사 시작". We need to extend so that after the transcribe smoke test, the page transitions to a state where HighlightCard is rendered. The transcribe mock already returns `{ duration: 19, language: 'en', segments: [], words: [] }` immediately, so the transcribe flow naturally lands in `done`.
+
+- [ ] **Step 1: Extend `installApiMock` to expose extractHighlights in `calls` (so tests can assert on it)**
+
+In `tests/renderer/NewJob.test.tsx`, find the `calls` object. Add the same pattern used for `transcribeFile`:
+
+```ts
+extractHighlights: vi.fn(async () => ({
+  highlightsPath: '/tmp/dQw4w9WgXcQ.mp4.highlights.json',
+  highlightSet: {
+    generatedAt: '2026-05-09T00:00:00Z',
+    model: 'm',
+    audioPath: '/tmp/dQw4w9WgXcQ.mp4',
+    highlights: [
+      { start_sec: 0, end_sec: 30, title: 'Opener', hook: 'Strong start' },
+    ],
+  },
+})),
+```
+
+In the api object, replace the existing `extractHighlights: vi.fn(...)` with `extractHighlights: calls.extractHighlights`.
+
+- [ ] **Step 2: Add test for missing-key state**
+
+After the existing 4 tests, add:
+
+```tsx
+it('shows the missing-key state when no API key is set', async () => {
+  installApiMock({
+    hasApiKey: vi.fn(async () => false),
+  });
+  const user = userEvent.setup();
+  render(<NewJobPage />);
+  await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
+  await user.click(screen.getByRole('button', { name: '미리보기' }));
+  await waitFor(() => screen.getByRole('button', { name: '다운로드' }));
+  await user.click(screen.getByRole('button', { name: '다운로드' }));
+  await waitFor(() => screen.getByRole('button', { name: 'STT 시작' }));
+  await user.click(screen.getByRole('button', { name: 'STT 시작' }));
+  await waitFor(() => screen.getByRole('button', { name: '설정으로 이동' }));
+});
+```
+
+- [ ] **Step 3: Add test for the happy-path extract**
+
+Append:
+
+```tsx
+it('shows the 하이라이트 추출 button after transcribe completes and triggers extractHighlights on click', async () => {
+  const calls = installApiMock({
+    hasApiKey: vi.fn(async () => true),
+  });
+  const user = userEvent.setup();
+  render(<NewJobPage />);
+  await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
+  await user.click(screen.getByRole('button', { name: '미리보기' }));
+  await waitFor(() => screen.getByRole('button', { name: '다운로드' }));
+  await user.click(screen.getByRole('button', { name: '다운로드' }));
+  await waitFor(() => screen.getByRole('button', { name: 'STT 시작' }));
+  await user.click(screen.getByRole('button', { name: 'STT 시작' }));
+  await waitFor(() => screen.getByRole('button', { name: '하이라이트 추출' }));
+  await user.click(screen.getByRole('button', { name: '하이라이트 추출' }));
+  await waitFor(() =>
+    expect(calls.extractHighlights).toHaveBeenCalledWith('/tmp/dQw4w9WgXcQ.mp4'),
+  );
+});
+```
+
+- [ ] **Step 4: Run the test file**
+
+```bash
+yarn test tests/renderer/NewJob.test.tsx
+```
+
+Expected: 6 tests pass (4 existing + 2 new).
+
+- [ ] **Step 5: Run the full suite**
+
+```bash
+yarn test
+```
+
+Expected: prior count + 2 new (so 73 + 2 = 75 if M4 ended at 73 after the notify fix; the actual baseline depends on whether ChunkPlanner/OpenRouterClient/HighlightService tests ran in earlier tasks). Just confirm "no regressions, all green".
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add tests/renderer/NewJob.test.tsx
+git commit -m "test(m5): smoke tests for missing-key state and 하이라이트 추출 button"
+```
+
+---
+
+### Task 13: DoD verification + README + branch finalize
+
+**Files:**
+- Modify: `README.md`
+
+- [ ] **Step 1: Run all DoD checks**
+
+```bash
+yarn typecheck && yarn lint && yarn test && yarn build
+cd sidecar && uv run pytest && cd ..
+```
+
+Expected: all green. Sidecar pytest still 16/16 (M4 unchanged). Vitest count is whatever is current — confirm no regressions.
+
+- [ ] **Step 2: Manual integration check (real OpenRouter call, real transcript)**
+
+Use the previously-downloaded test file from M3/M4 dev runs. In one terminal:
+
+```bash
+yarn dev
+```
+
+In the app:
+1. **Settings page** — enter your OpenRouter API key (use the existing API key field). Confirm it saves (button shows "저장됨").
+2. **Settings page** — confirm `llm.model` is set (defaults to `anthropic/claude-sonnet-4.5`; pick something fast like `openai/gpt-4o-mini` or `google/gemini-flash-1.5` for first test if you want).
+3. **NewJob page** — paste a short YouTube URL (the test video from M4 works), click 미리보기, 다운로드 (wait for completion), STT 시작 (wait for transcript), 하이라이트 추출.
+4. Within ~10-30s (depends on model + transcript length) you should see chunk progress (or finish in one call for short videos) and a list of highlight cards.
+5. Click "JSON 열기" — the highlights.json should open in your default editor.
+
+If the LLM call fails:
+- 401 → API key wrong (the IPC error message will surface; the missing-key state should NOT be triggered for 401, only for empty key).
+- Schema validation fail → the model didn't follow the JSON schema. Try a different model.
+- Network → check internet, OpenRouter status.
+
+If something is broken, fix and re-test BEFORE continuing.
+
+- [ ] **Step 3: Update README status**
+
+Edit `README.md` `## Status`:
+
+```markdown
+## Status
+
+- ✅ M1: Project Skeleton
+- ✅ M2: Settings page
+- ✅ M3: YouTube preview + download
+- ✅ M4: Python sidecar + STT — uv-managed sidecar with faster-whisper, JSON-RPC stdio, lazy boot, transcript.json next to source.
+- ✅ M5: LLM highlight extraction — OpenRouter via openai SDK, sliding-window for long transcripts, highlights.json next to source, in-app card list.
+- ⏳ M6: First end-to-end (ffmpeg simple crop) (next)
+```
+
+- [ ] **Step 4: Commit + push branch**
+
+```bash
+yarn prettier --write README.md
+git add README.md
+git commit -m "docs(m5): mark milestone 5 complete in README"
+git push -u origin m5-llm-highlight-extraction
+```
+
+- [ ] **Step 5: Merge to master + tag**
+
+(Done by the controller via `superpowers:finishing-a-development-branch` skill — see DoD below.)
+
+---
+
+## Definition of Done (M5)
+
+All of these must be true:
+
+1. `yarn typecheck`, `yarn lint` (only known `__dirname` warning), `yarn test`, `yarn build` all exit 0.
+2. `cd sidecar && uv run pytest` reports all sidecar tests passing (16, unchanged from M4).
+3. `yarn test` includes new test files: `ChunkPlanner.test.ts` (5), `OpenRouterClient.test.ts` (6), `HighlightService.test.ts` (6), and 2 new NewJob smoke tests. No regressions in pre-existing tests.
+4. Manual integration: real `yarn dev` run downloads a short video, transcribes, clicks 하이라이트 추출, sees a card list of highlights, opens highlights.json successfully.
+5. Branch `m5-llm-highlight-extraction` is pushed to origin.
+6. After review, branch merged to master with `--no-ff` and tagged `m5-complete` on master.
+
+## What's NOT in M5 (intentionally deferred)
+
+- **Streaming responses**: spec doesn't require token streaming for M5 (response is structured JSON, not narrative). Add later if perceived latency is a problem.
+- **Tool-call mode**: we use `response_format: json_object` only. Switching to OpenAI-style tool calls (more strict schema enforcement on supported models) is an M9-class refinement.
+- **Per-model JSON-mode capability detection**: spec mentions different models support JSON mode differently. M5 trusts whatever the user picks; if a model fails repeatedly, the renderer surfaces an error and the user picks a different model. Auto-fallback is M9.
+- **Retry on schema-validation failure**: spec mentions "1회 재시도(temperature ↓)". This adds complexity (need to know whether the failure was malformed JSON vs schema mismatch vs network) and would require more testing. Defer to M9 once we have telemetry on which models actually fail.
+- **Highlight rendering / preview**: M5 just lists the highlights as cards with title + hook + timestamp. Actually rendering preview clips is M6.
+- **History persistence (SQLite)**: spec's M9. M5 only writes the JSON file beside the source video; the eventual history view will index those.
+- **Cost / token usage telemetry**: would require parsing the OpenRouter response for token counts and surfacing it. Useful but not in scope.
+
+## Notes for the implementing agent
+
+- Start the milestone branch BEFORE Task 1: `git checkout master && git pull && git checkout -b m5-llm-highlight-extraction`. (Per the per-milestone branch workflow established in M4.)
+- The bob-park ESLint config bans `../*` parent imports — use `@renderer/*`, `@shared/*` aliases.
+- `secureStorage.getKey()` in Task 7 may require adding a public method to `SecureStorage` if it doesn't exist. Read the M2 implementation first; if `setKey` writes via `safeStorage.encryptString` to a file, `getKey` is the inverse: read file, `safeStorage.decryptString`. Add tests at the same time.
+- `openai` SDK version: `^4.71.0` is the current major as of plan writing. If yarn resolves a higher 4.x, that's fine. Don't accept 5.x without checking the API surface (response_format / messages shape).
+- The sliding-window thresholds (4000 / 2500 / 300) are seeded from the spec and rough heuristics. Tune later if real-world transcripts show problems (highlights cut at chunk boundaries → increase overlap; rerank call too long → smaller chunkSize).
+- The `useHighlights` hook intentionally calls `hasApiKey()` on mount (the "probing" state). This is one extra IPC round-trip but avoids the worse UX of "click button → wait → see error". If the user updates the key in Settings, they need to navigate back to NewJob and the hook will re-probe (the `refreshKeyStatus` is exposed in case future code wants to call it explicitly after a settings change).

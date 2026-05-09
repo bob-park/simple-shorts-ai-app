@@ -37,6 +37,14 @@ beforeAll(() => {
     revealInFolder: vi.fn(async () => undefined),
     setApiKey: () => Promise.resolve(),
     updateSettings: (patch: Partial<Settings>) => Promise.resolve({ ...STUB_SETTINGS, ...patch }),
+    transcribeFile: vi.fn(async () => ({
+      transcriptPath: '/tmp/x.transcript.json',
+      transcript: { duration: 0, language: '', segments: [], words: [] },
+    })),
+    cancelTranscribe: vi.fn(async () => undefined),
+    onTranscribeProgress: vi.fn(() => () => undefined),
+    sidecarHealth: vi.fn(async () => ({ ok: true, modelsLoaded: [] })),
+    openPath: vi.fn(async () => undefined),
   } satisfies Window['api'];
 });
 

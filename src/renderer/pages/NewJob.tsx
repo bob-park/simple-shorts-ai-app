@@ -1,12 +1,15 @@
 import { DownloadProgress } from '@renderer/components/newjob/DownloadProgress';
 import { PreviewCard } from '@renderer/components/newjob/PreviewCard';
+import { TranscribeCard } from '@renderer/components/newjob/TranscribeCard';
 import { UrlInput } from '@renderer/components/newjob/UrlInput';
 import { useDownload } from '@renderer/hooks/useDownload';
+import { useTranscribe } from '@renderer/hooks/useTranscribe';
 import { useVideoPreview } from '@renderer/hooks/useVideoPreview';
 
 export function NewJobPage() {
   const preview = useVideoPreview();
   const download = useDownload();
+  const transcribe = useTranscribe();
 
   const downloadInFlight = download.status === 'starting' || download.status === 'downloading';
 
@@ -51,17 +54,53 @@ export function NewJobPage() {
       ) : null}
 
       {download.state.status === 'done' ? (
-        <DownloadProgress
-          status="done"
-          outputPath={download.state.outputPath}
-          onReveal={() => {
-            if (download.state.status === 'done') void window.api.revealInFolder(download.state.outputPath);
-          }}
-          onReset={() => {
-            download.reset();
-            preview.reset();
-          }}
-        />
+        <>
+          <DownloadProgress
+            status="done"
+            outputPath={download.state.outputPath}
+            onReveal={() => {
+              if (download.state.status === 'done') void window.api.revealInFolder(download.state.outputPath);
+            }}
+            onReset={() => {
+              download.reset();
+              preview.reset();
+              transcribe.reset();
+            }}
+          />
+          {transcribe.state.status === 'idle' ? (
+            <TranscribeCard
+              status="idle"
+              onStart={() => {
+                if (download.state.status === 'done') void transcribe.start(download.state.outputPath);
+              }}
+            />
+          ) : null}
+          {transcribe.state.status === 'starting' ? <TranscribeCard status="starting" /> : null}
+          {transcribe.state.status === 'transcribing' ? (
+            <TranscribeCard
+              status="transcribing"
+              progress={transcribe.state.progress}
+              onCancel={() => void transcribe.cancel()}
+            />
+          ) : null}
+          {transcribe.state.status === 'done' ? (
+            <TranscribeCard
+              status="done"
+              transcriptPath={transcribe.state.transcriptPath}
+              transcript={transcribe.state.transcript}
+              onOpen={() => {
+                if (transcribe.state.status === 'done') void window.api.openPath(transcribe.state.transcriptPath);
+              }}
+              onReset={() => transcribe.reset()}
+            />
+          ) : null}
+          {transcribe.state.status === 'canceled' ? (
+            <TranscribeCard status="canceled" onReset={() => transcribe.reset()} />
+          ) : null}
+          {transcribe.state.status === 'error' ? (
+            <TranscribeCard status="error" error={transcribe.state.error} onReset={() => transcribe.reset()} />
+          ) : null}
+        </>
       ) : null}
 
       {download.state.status === 'canceled' ? (

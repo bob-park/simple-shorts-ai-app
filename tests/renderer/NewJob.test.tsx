@@ -20,6 +20,10 @@ function installApiMock(overrides?: Partial<Window['api']>) {
     cancelDownload: vi.fn(async () => undefined),
     onDownloadProgress: vi.fn(() => () => undefined),
     revealInFolder: vi.fn(async () => undefined),
+    transcribeFile: vi.fn(async () => ({
+      transcriptPath: '/tmp/dQw4w9WgXcQ.mp4.transcript.json',
+      transcript: { duration: 19, language: 'en', segments: [], words: [] },
+    })),
   };
   const api: Window['api'] = {
     getAppVersion: vi.fn(async () => '0.0.1'),
@@ -35,6 +39,11 @@ function installApiMock(overrides?: Partial<Window['api']>) {
     cancelDownload: calls.cancelDownload,
     onDownloadProgress: calls.onDownloadProgress,
     revealInFolder: calls.revealInFolder,
+    transcribeFile: calls.transcribeFile,
+    cancelTranscribe: vi.fn(async () => undefined),
+    onTranscribeProgress: vi.fn(() => () => undefined),
+    sidecarHealth: vi.fn(async () => ({ ok: true, modelsLoaded: [] })),
+    openPath: vi.fn(async () => undefined),
     ...overrides,
   };
   Object.defineProperty(window, 'api', { value: api, writable: true, configurable: true });
@@ -74,5 +83,18 @@ describe('NewJobPage', () => {
     await waitFor(() => screen.getByRole('button', { name: '다운로드' }));
     await user.click(screen.getByRole('button', { name: '다운로드' }));
     await waitFor(() => expect(calls.downloadVideo).toHaveBeenCalledWith('https://youtu.be/dQw4w9WgXcQ'));
+  });
+
+  it('shows the STT 시작 button after download completes and triggers transcribeFile on click', async () => {
+    const calls = installApiMock();
+    const user = userEvent.setup();
+    render(<NewJobPage />);
+    await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
+    await user.click(screen.getByRole('button', { name: '미리보기' }));
+    await waitFor(() => screen.getByRole('button', { name: '다운로드' }));
+    await user.click(screen.getByRole('button', { name: '다운로드' }));
+    await waitFor(() => screen.getByRole('button', { name: 'STT 시작' }));
+    await user.click(screen.getByRole('button', { name: 'STT 시작' }));
+    await waitFor(() => expect(calls.transcribeFile).toHaveBeenCalledWith('/tmp/dQw4w9WgXcQ.mp4'));
   });
 });
