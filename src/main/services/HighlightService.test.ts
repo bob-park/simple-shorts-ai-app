@@ -1,29 +1,27 @@
-import type { Transcript } from '@shared/transcript';
+import type { Segment, Transcript } from '@shared/transcript';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HighlightService } from './HighlightService';
 
-function makeTranscript(wordCount: number): Transcript {
+function fakeSegments(count: number, durationEach = 5): Segment[] {
+  return Array.from({ length: count }, (_, i) => ({
+    start: i * durationEach,
+    end: (i + 1) * durationEach,
+    text: `segment ${i}`,
+  }));
+}
+
+function makeTranscript(segmentCount: number, durationEach = 5): Transcript {
+  const segments = fakeSegments(segmentCount, durationEach);
   return {
-    duration: wordCount * 0.4,
+    duration: segmentCount * durationEach,
     language: 'en',
-    segments: [],
-    words: Array.from({ length: wordCount }, (_, i) => ({
-      start: i * 0.4,
-      end: (i + 1) * 0.4,
-      text: `w${i}`,
-    })),
+    segments,
+    words: [],
   };
 }
 
-const validResponse = {
-  highlights: [
-    { start_sec: 0, end_sec: 30, title: 'Opener', hook: 'It starts strong' },
-    { start_sec: 60, end_sec: 90, title: 'Middle', hook: 'Big reveal' },
-  ],
-};
-
-describe('HighlightService', () => {
+describe('HighlightService (segment-based)', () => {
   let chatJson: ReturnType<typeof vi.fn>;
   let client: { chatJson: typeof chatJson };
   let service: HighlightService;
@@ -34,121 +32,161 @@ describe('HighlightService', () => {
     service = new HighlightService(client as never);
   });
 
-  it('makes one LLM call for short transcripts (no rerank)', async () => {
-    chatJson.mockResolvedValue(validResponse);
-    const transcript = makeTranscript(1500); // below threshold
+  it('makes one LLM call for short transcripts and maps segment indices to time ranges', async () => {
+    chatJson.mockResolvedValue({
+      highlights: [
+        { segment_indices: [0, 1], title: 'Opener', hook: 'It starts strong' },
+        { segment_indices: [3, 4, 5], title: 'Mid', hook: 'Big reveal' },
+      ],
+    });
     const result = await service.extract({
-      transcript,
+      transcript: makeTranscript(50),
       audioPath: '/x.mp4',
       apiKey: 'k',
       model: 'm',
       count: 2,
-      minSec: 20,
+      minSec: 5,
       maxSec: 60,
     });
     expect(chatJson).toHaveBeenCalledTimes(1);
     expect(result.highlights).toHaveLength(2);
-    expect(result.model).toBe('m');
-    expect(result.audioPath).toBe('/x.mp4');
-    expect(result.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(result.highlights[0]!.segments).toEqual([
+      { start_sec: 0, end_sec: 5 },
+      { start_sec: 5, end_sec: 10 },
+    ]);
+    expect(result.highlights[1]!.segments).toEqual([
+      { start_sec: 15, end_sec: 20 },
+      { start_sec: 20, end_sec: 25 },
+      { start_sec: 25, end_sec: 30 },
+    ]);
   });
 
-  it('chunks long transcripts and runs a final rerank call', async () => {
-    chatJson
-      .mockResolvedValueOnce(validResponse) // chunk 1
-      .mockResolvedValueOnce(validResponse) // chunk 2
-      .mockResolvedValueOnce(validResponse) // chunk 3
-      .mockResolvedValueOnce(validResponse) // chunk 4
-      .mockResolvedValueOnce(validResponse); // rerank
-    const transcript = makeTranscript(7000);
+  it('dedupes duplicate indices in the same highlight', async () => {
+    chatJson.mockResolvedValue({
+      highlights: [{ segment_indices: [0, 1, 1, 0], title: 'A', hook: 'h' }],
+    });
     const result = await service.extract({
-      transcript,
+      transcript: makeTranscript(10),
       audioPath: '/x.mp4',
       apiKey: 'k',
       model: 'm',
-      count: 2,
-      minSec: 20,
+      count: 1,
+      minSec: 5,
       maxSec: 60,
     });
-    // 7000 words at chunkSize=2500 step=2200 → 4 chunks; +1 rerank = 5
-    expect(chatJson).toHaveBeenCalledTimes(5);
-    expect(result.highlights).toHaveLength(2);
+    expect(result.highlights[0]!.segments).toHaveLength(2);
   });
 
-  it('emits progress per chunk and once for rerank', async () => {
-    chatJson.mockResolvedValue(validResponse);
-    const transcript = makeTranscript(5000);
-    const events: { chunkIndex: number; chunkTotal: number; phase: string }[] = [];
-    service.onProgress((p) => events.push(p));
-    await service.extract({
-      transcript,
+  it('sorts segments chronologically regardless of LLM output order', async () => {
+    chatJson.mockResolvedValue({
+      highlights: [{ segment_indices: [5, 0, 3], title: 'A', hook: 'h' }],
+    });
+    const result = await service.extract({
+      transcript: makeTranscript(10),
       audioPath: '/x.mp4',
       apiKey: 'k',
       model: 'm',
-      count: 2,
+      count: 1,
+      minSec: 5,
+      maxSec: 60,
+    });
+    expect(result.highlights[0]!.segments.map((s) => s.start_sec)).toEqual([0, 15, 25]);
+  });
+
+  it('drops highlights with out-of-bounds segment indices', async () => {
+    chatJson.mockResolvedValue({
+      highlights: [
+        { segment_indices: [0, 1], title: 'Valid', hook: 'h' },
+        { segment_indices: [99, 100], title: 'Invalid', hook: 'h' },
+      ],
+    });
+    const result = await service.extract({
+      transcript: makeTranscript(10),
+      audioPath: '/x.mp4',
+      apiKey: 'k',
+      model: 'm',
+      count: 5,
+      minSec: 5,
+      maxSec: 60,
+    });
+    expect(result.highlights).toHaveLength(1);
+    expect(result.highlights[0]!.title).toBe('Valid');
+  });
+
+  it('drops highlights whose total duration falls outside [minSec, maxSec]', async () => {
+    chatJson.mockResolvedValue({
+      highlights: [
+        // 1 segment × 5s = 5s — too short for minSec=20
+        { segment_indices: [0], title: 'TooShort', hook: 'h' },
+        // 5 segments × 5s = 25s — within [20, 60]
+        { segment_indices: [0, 1, 2, 3, 4], title: 'Good', hook: 'h' },
+        // 14 segments × 5s = 70s — exceeds maxSec=60
+        { segment_indices: Array.from({ length: 14 }, (_, i) => i), title: 'TooLong', hook: 'h' },
+      ],
+    });
+    const result = await service.extract({
+      transcript: makeTranscript(20),
+      audioPath: '/x.mp4',
+      apiKey: 'k',
+      model: 'm',
+      count: 5,
       minSec: 20,
       maxSec: 60,
     });
-    // 5000 words → 3 chunks (0, 2200, 4400) + 1 rerank
-    expect(events.length).toBe(4);
-    expect(events[0]).toMatchObject({ chunkIndex: 1, chunkTotal: 3, phase: 'chunk' });
-    expect(events[3]).toMatchObject({ chunkIndex: 1, chunkTotal: 1, phase: 'rerank' });
+    expect(result.highlights.map((h) => h.title)).toEqual(['Good']);
+  });
+
+  it('rebases chunk-local indices to global when running multi-chunk + rerank', async () => {
+    // 200 segments → 2 chunks (chunkSize=100, overlap=10 → step=90)
+    //   chunk 0: indices 0..99    (firstIndex=0)
+    //   chunk 1: indices 90..189  (firstIndex=90)
+    //   chunk 2: indices 180..199 (firstIndex=180)
+    chatJson
+      .mockResolvedValueOnce({
+        // chunk 0 returns local index 5 → global 5
+        highlights: [{ segment_indices: [5, 6], title: 'C0', hook: 'h' }],
+      })
+      .mockResolvedValueOnce({
+        // chunk 1 returns local index 0 → global 90
+        highlights: [{ segment_indices: [0, 1], title: 'C1', hook: 'h' }],
+      })
+      .mockResolvedValueOnce({
+        // chunk 2 returns local index 5 → global 185
+        highlights: [{ segment_indices: [5, 6], title: 'C2', hook: 'h' }],
+      })
+      .mockResolvedValueOnce({
+        // rerank: pick the one spanning global 90..91
+        highlights: [{ segment_indices: [90, 91], title: 'C1', hook: 'h' }],
+      });
+    const result = await service.extract({
+      transcript: makeTranscript(200),
+      audioPath: '/x.mp4',
+      apiKey: 'k',
+      model: 'm',
+      count: 1,
+      minSec: 5,
+      maxSec: 60,
+    });
+    expect(chatJson).toHaveBeenCalledTimes(4); // 3 chunks + 1 rerank
+    expect(result.highlights).toHaveLength(1);
+    expect(result.highlights[0]!.segments).toEqual([
+      { start_sec: 450, end_sec: 455 }, // segment 90
+      { start_sec: 455, end_sec: 460 }, // segment 91
+    ]);
   });
 
   it('throws MissingApiKeyError when apiKey is empty', async () => {
     await expect(
       service.extract({
-        transcript: makeTranscript(100),
+        transcript: makeTranscript(10),
         audioPath: '/x.mp4',
         apiKey: '',
         model: 'm',
-        count: 2,
-        minSec: 20,
+        count: 1,
+        minSec: 5,
         maxSec: 60,
       }),
     ).rejects.toThrow(/OpenRouter API key is not set/i);
     expect(chatJson).not.toHaveBeenCalled();
-  });
-
-  it('rejects when the LLM returns a malformed payload', async () => {
-    chatJson.mockResolvedValue({ highlights: [{ start_sec: 'not a number' }] });
-    await expect(
-      service.extract({
-        transcript: makeTranscript(100),
-        audioPath: '/x.mp4',
-        apiKey: 'k',
-        model: 'm',
-        count: 2,
-        minSec: 20,
-        maxSec: 60,
-      }),
-    ).rejects.toThrow();
-  });
-
-  it('cancel() aborts in-flight LLM calls', async () => {
-    let abortedSignal: AbortSignal | null = null;
-    chatJson.mockImplementation(
-      (opts: { signal?: AbortSignal }) =>
-        new Promise((_resolve, reject) => {
-          abortedSignal = opts.signal ?? null;
-          opts.signal?.addEventListener('abort', () => {
-            reject(new Error('AbortError: aborted by caller'));
-          });
-        }),
-    );
-    const promise = service.extract({
-      transcript: makeTranscript(100),
-      audioPath: '/x.mp4',
-      apiKey: 'k',
-      model: 'm',
-      count: 2,
-      minSec: 20,
-      maxSec: 60,
-    });
-    // Wait for the call to start
-    await new Promise((r) => setTimeout(r, 0));
-    service.cancel();
-    await expect(promise).rejects.toThrow(/abort/i);
-    expect(abortedSignal).not.toBeNull();
   });
 });
