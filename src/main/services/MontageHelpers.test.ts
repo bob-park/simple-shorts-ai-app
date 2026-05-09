@@ -1,5 +1,5 @@
 import type { HighlightSegment } from '@shared/highlight';
-import type { TrackFrame, TrackResult } from '@shared/track';
+import type { TrackResult } from '@shared/track';
 import type { Word } from '@shared/transcript';
 import { describe, expect, it } from 'vitest';
 

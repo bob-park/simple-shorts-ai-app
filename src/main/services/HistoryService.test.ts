@@ -18,7 +18,11 @@ function fakeMeta(overrides: Partial<VideoMeta> = {}): VideoMeta {
 }
 
 function fakeHighlight(start: number, end: number, title: string, hook = 'h'): Highlight {
-  return { start_sec: start, end_sec: end, title, hook };
+  return {
+    segments: [{ start_sec: start, end_sec: end }],
+    title,
+    hook,
+  };
 }
 
 function fakeHighlightSet(highlights: Highlight[]): HighlightSet {

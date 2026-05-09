@@ -1,4 +1,3 @@
-import type { Highlight } from '@shared/highlight';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RenderService } from './RenderService';
