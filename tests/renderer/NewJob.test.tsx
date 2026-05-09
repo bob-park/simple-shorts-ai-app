@@ -24,6 +24,15 @@ function installApiMock(overrides?: Partial<Window['api']>) {
       transcriptPath: '/tmp/dQw4w9WgXcQ.mp4.transcript.json',
       transcript: { duration: 19, language: 'en', segments: [], words: [] },
     })),
+    extractHighlights: vi.fn(async () => ({
+      highlightsPath: '/tmp/dQw4w9WgXcQ.mp4.highlights.json',
+      highlightSet: {
+        generatedAt: '2026-05-09T00:00:00Z',
+        model: 'm',
+        audioPath: '/tmp/dQw4w9WgXcQ.mp4',
+        highlights: [{ start_sec: 0, end_sec: 30, title: 'Opener', hook: 'Strong start' }],
+      },
+    })),
   };
   const api: Window['api'] = {
     getAppVersion: vi.fn(async () => '0.0.1'),
@@ -43,10 +52,7 @@ function installApiMock(overrides?: Partial<Window['api']>) {
     cancelTranscribe: vi.fn(async () => undefined),
     onTranscribeProgress: vi.fn(() => () => undefined),
     sidecarHealth: vi.fn(async () => ({ ok: true, modelsLoaded: [] })),
-    extractHighlights: vi.fn(async () => ({
-      highlightsPath: '/tmp/x.highlights.json',
-      highlightSet: { generatedAt: '2026-05-09T00:00:00Z', model: 'm', audioPath: '/tmp/x', highlights: [] },
-    })),
+    extractHighlights: calls.extractHighlights,
     cancelExtract: vi.fn(async () => undefined),
     onExtractProgress: vi.fn(() => () => undefined),
     openPath: vi.fn(async () => undefined),
@@ -102,5 +108,37 @@ describe('NewJobPage', () => {
     await waitFor(() => screen.getByRole('button', { name: 'STT 시작' }));
     await user.click(screen.getByRole('button', { name: 'STT 시작' }));
     await waitFor(() => expect(calls.transcribeFile).toHaveBeenCalledWith('/tmp/dQw4w9WgXcQ.mp4'));
+  });
+
+  it('shows the missing-key state when no API key is set', async () => {
+    installApiMock({
+      hasApiKey: vi.fn(async () => false),
+    });
+    const user = userEvent.setup();
+    render(<NewJobPage />);
+    await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
+    await user.click(screen.getByRole('button', { name: '미리보기' }));
+    await waitFor(() => screen.getByRole('button', { name: '다운로드' }));
+    await user.click(screen.getByRole('button', { name: '다운로드' }));
+    await waitFor(() => screen.getByRole('button', { name: 'STT 시작' }));
+    await user.click(screen.getByRole('button', { name: 'STT 시작' }));
+    await waitFor(() => screen.getByRole('button', { name: '설정으로 이동' }));
+  });
+
+  it('shows the 하이라이트 추출 button after transcribe completes and triggers extractHighlights on click', async () => {
+    const calls = installApiMock({
+      hasApiKey: vi.fn(async () => true),
+    });
+    const user = userEvent.setup();
+    render(<NewJobPage />);
+    await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
+    await user.click(screen.getByRole('button', { name: '미리보기' }));
+    await waitFor(() => screen.getByRole('button', { name: '다운로드' }));
+    await user.click(screen.getByRole('button', { name: '다운로드' }));
+    await waitFor(() => screen.getByRole('button', { name: 'STT 시작' }));
+    await user.click(screen.getByRole('button', { name: 'STT 시작' }));
+    await waitFor(() => screen.getByRole('button', { name: '하이라이트 추출' }));
+    await user.click(screen.getByRole('button', { name: '하이라이트 추출' }));
+    await waitFor(() => expect(calls.extractHighlights).toHaveBeenCalledWith('/tmp/dQw4w9WgXcQ.mp4'));
   });
 });
