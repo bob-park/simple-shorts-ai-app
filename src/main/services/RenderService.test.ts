@@ -320,3 +320,107 @@ describe('RenderService with tracker', () => {
     expect(result.results[0]!.status).toBe('done');
   });
 });
+
+const SUBTITLE_OPTS = {
+  fontFamily: 'Pretendard',
+  fontSize: 64,
+  fillColor: '#FFFFFF',
+  outlineColor: '#000000',
+  position: 'bottom' as const,
+};
+
+function fakeWords(specs: { text: string; start: number; end: number }[]) {
+  return specs;
+}
+
+describe('RenderService with subtitles', () => {
+  let run: ReturnType<typeof vi.fn>;
+  let runner: { run: typeof run };
+
+  beforeEach(() => {
+    run = vi.fn();
+    runner = { run };
+  });
+
+  it('writes .ass file and appends subtitles= to filter chain when options provided + words in window', async () => {
+    const writeFile = vi.fn(async () => undefined);
+    const fs = { writeFile };
+    const service = new RenderService(runner as never, { fs: fs as never });
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+
+    const promise = service.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [fakeHighlight(1, 0, 30)],
+      transcriptWords: fakeWords([
+        { text: 'hello', start: 0, end: 0.5 },
+        { text: 'world', start: 0.5, end: 1.0 },
+      ]),
+      subtitleOptions: SUBTITLE_OPTS,
+    });
+    h._resolve();
+    const result = await promise;
+
+    // .ass file written
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(writeFile.mock.calls[0]![0]).toBe('/tmp/out/short_1.ass');
+    const assContent = writeFile.mock.calls[0]![1] as string;
+    expect(assContent).toContain('Dialogue:');
+    expect(assContent).toContain('hello world');
+
+    // ffmpeg filter chain ends with subtitles=filename=<path>
+    const args: string[] = run.mock.calls[0]![0].args;
+    const vfIndex = args.indexOf('-vf');
+    expect(args[vfIndex + 1]).toContain('crop=ih*9/16:ih,scale=1080:1920,subtitles=filename=/tmp/out/short_1.ass');
+
+    // RenderClipResult.subtitles populated
+    expect(result.results[0]!.subtitles).toEqual({ cues: 1, assPath: '/tmp/out/short_1.ass' });
+  });
+
+  it('skips ass writing + filter when subtitleOptions is undefined', async () => {
+    const writeFile = vi.fn(async () => undefined);
+    const fs = { writeFile };
+    const service = new RenderService(runner as never, { fs: fs as never });
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+
+    const promise = service.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [fakeHighlight(1, 0, 30)],
+      transcriptWords: fakeWords([{ text: 'hi', start: 0, end: 0.5 }]),
+      // subtitleOptions intentionally omitted
+    });
+    h._resolve();
+    const result = await promise;
+
+    expect(writeFile).not.toHaveBeenCalled();
+    const args: string[] = run.mock.calls[0]![0].args;
+    expect(args[args.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    expect(result.results[0]!.subtitles).toBeNull();
+  });
+
+  it('skips ass writing when no transcript words fall inside the clip window', async () => {
+    const writeFile = vi.fn(async () => undefined);
+    const fs = { writeFile };
+    const service = new RenderService(runner as never, { fs: fs as never });
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+
+    const promise = service.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [fakeHighlight(1, 100, 130)],
+      transcriptWords: fakeWords([{ text: 'hi', start: 0, end: 0.5 }]), // outside [100, 130]
+      subtitleOptions: SUBTITLE_OPTS,
+    });
+    h._resolve();
+    const result = await promise;
+
+    expect(writeFile).not.toHaveBeenCalled();
+    const args: string[] = run.mock.calls[0]![0].args;
+    expect(args[args.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    expect(result.results[0]!.subtitles).toBeNull();
+  });
+});
