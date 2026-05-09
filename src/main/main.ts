@@ -1,7 +1,9 @@
 import { HighlightSetSchema } from '@shared/highlight';
+import { HistoryListQuerySchema } from '@shared/history';
 import type { Settings } from '@shared/settings';
 import { TranscriptSchema, type Word } from '@shared/transcript';
 import { sanitizeFilename } from '@shared/youtube';
+import Database from 'better-sqlite3';
 import { BrowserWindow, app, dialog, ipcMain, safeStorage, session, shell } from 'electron';
 import Store from 'electron-store';
 import { spawn } from 'node:child_process';
@@ -11,12 +13,15 @@ import { fileURLToPath } from 'node:url';
 import youtubeDl from 'youtube-dl-exec';
 
 import { FfmpegRunner } from './infra/FfmpegRunner';
+import { HistoryRepo } from './infra/HistoryRepo';
 import { OpenRouterClient } from './infra/OpenRouterClient';
 import { PythonSidecar } from './infra/PythonSidecar';
 import { SecureStorage } from './infra/SecureStorage';
 import { SettingsStore } from './infra/SettingsStore';
 import { HighlightService } from './services/HighlightService';
+import { HistoryService } from './services/HistoryService';
 import { RenderService } from './services/RenderService';
+import { ThumbnailService } from './services/ThumbnailService';
 import { TrackingService } from './services/TrackingService';
 import { TranscribeService } from './services/TranscribeService';
 import { type DownloadHandle, YouTubeService } from './services/YouTubeService';
@@ -43,6 +48,9 @@ let renderService: RenderService | null = null;
 let renderProgressUnsub: (() => void) | null = null;
 let renderInFlight = false;
 let trackingService: TrackingService | null = null;
+
+let historyRepo: HistoryRepo | null = null;
+let historyService: HistoryService | null = null;
 
 function setupContentSecurityPolicy(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -157,6 +165,27 @@ function getRenderService(): RenderService {
     }
   });
   return renderService;
+}
+
+function getHistoryRepo(): HistoryRepo {
+  if (historyRepo) return historyRepo;
+  const dbPath = join(app.getPath('userData'), 'history.db');
+  historyRepo = new HistoryRepo(new Database(dbPath));
+  return historyRepo;
+}
+
+function getHistoryService(): HistoryService {
+  if (historyService) return historyService;
+  if (!ffmpegRunner) {
+    ffmpegRunner = new FfmpegRunner({ spawn });
+  }
+  const thumbnails = new ThumbnailService(ffmpegRunner);
+  historyService = new HistoryService({
+    repo: getHistoryRepo(),
+    thumbs: thumbnails,
+    thumbsDir: join(app.getPath('userData'), 'thumbs'),
+  });
+  return historyService;
 }
 
 void app.whenReady().then(() => {
@@ -362,7 +391,7 @@ void app.whenReady().then(() => {
       }
 
       const service = getRenderService();
-      return await service.render({
+      const renderResult = await service.render({
         sourcePath: audioPath,
         outputDir,
         highlights: highlightSet.highlights,
@@ -378,6 +407,25 @@ void app.whenReady().then(() => {
               }
             : undefined,
       });
+
+      // M9: persist to history. Best-effort — render result is returned even if
+      // persistence fails (avoids losing the user's render to a DB error).
+      try {
+        const metaPath = `${audioPath}.meta.json`;
+        const metaRaw = await fsPromises.readFile(metaPath, 'utf8');
+        const meta = JSON.parse(metaRaw);
+        await getHistoryService().recordJob({
+          meta,
+          sourcePath: audioPath,
+          highlightSet,
+          renderResult,
+          whisperModel: settings.whisper.model,
+        });
+      } catch (e) {
+        process.stderr.write(`[m9] failed to record history: ${(e as Error).message}\n`);
+      }
+
+      return renderResult;
     } finally {
       renderInFlight = false;
     }
@@ -385,6 +433,23 @@ void app.whenReady().then(() => {
 
   ipcMain.handle('render:cancel', () => {
     renderService?.cancel();
+  });
+
+  ipcMain.handle('history:list', (_e, query: unknown) => {
+    const parsed = HistoryListQuerySchema.parse(query);
+    return getHistoryRepo().listSummaries(parsed);
+  });
+
+  ipcMain.handle('history:getDetail', (_e, jobId: string) => {
+    const repo = getHistoryRepo();
+    const job = repo.getJob(jobId);
+    if (!job) return null;
+    const shorts = repo.getShortsByJob(jobId);
+    return { job, shorts };
+  });
+
+  ipcMain.handle('history:delete', (_e, jobId: string) => {
+    getHistoryRepo().deleteJob(jobId);
   });
 
   createMainWindow();
@@ -411,5 +476,8 @@ app.on('window-all-closed', () => {
   renderService = null;
   ffmpegRunner = null;
   trackingService = null;
+  historyRepo?._db.close();
+  historyRepo = null;
+  historyService = null;
   if (process.platform !== 'darwin') app.quit();
 });
