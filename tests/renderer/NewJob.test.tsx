@@ -95,8 +95,6 @@ describe('NewJobPage', () => {
     await user.click(screen.getByRole('button', { name: '다운로드' }));
     await waitFor(() => screen.getByRole('button', { name: 'STT 시작' }));
     await user.click(screen.getByRole('button', { name: 'STT 시작' }));
-    await waitFor(() =>
-      expect(calls.transcribeFile).toHaveBeenCalledWith('/tmp/dQw4w9WgXcQ.mp4'),
-    );
+    await waitFor(() => expect(calls.transcribeFile).toHaveBeenCalledWith('/tmp/dQw4w9WgXcQ.mp4'));
   });
 });
