@@ -8,10 +8,29 @@ same worker-thread pattern used by transcribe.
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Callable
 
 from huggingface_hub import hf_hub_download
+from llama_cpp import Llama, LlamaGrammar
+
+
+HIGHLIGHTS_GBNF = r'''
+root        ::= "{" ws "\"highlights\"" ws ":" ws highlights ws "}"
+highlights  ::= "[" ws (highlight (ws "," ws highlight)*)? ws "]"
+highlight   ::= "{" ws
+                  "\"segment_indices\"" ws ":" ws indices ws "," ws
+                  "\"title\"" ws ":" ws string ws "," ws
+                  "\"hook\"" ws ":" ws string
+                ws "}"
+indices     ::= "[" ws (integer (ws "," ws integer)*)? ws "]"
+integer     ::= [0-9]+
+string      ::= "\"" char* "\""
+char        ::= [^"\\] | "\\" ["\\/bfnrt] | "\\u" hex hex hex hex
+hex         ::= [0-9a-fA-F]
+ws          ::= [ \t\n]*
+'''
 
 
 class LlmEngine:
@@ -85,3 +104,55 @@ class LlmEngine:
                     os.rmdir(partial_dir)
             except OSError:
                 pass
+
+    # Pre-compile grammars at first use (lazy so tests can patch).
+    _grammars: dict[str, Any] = {}
+
+    @classmethod
+    def _grammar(cls, schema_id: str) -> Any:
+        if schema_id not in cls._grammars:
+            if schema_id in ("highlights", "highlights_rerank"):
+                cls._grammars[schema_id] = LlamaGrammar.from_string(HIGHLIGHTS_GBNF)
+            else:
+                raise ValueError(f"unknown schema_id: {schema_id!r}")
+        return cls._grammars[schema_id]
+
+    def _ensure_loaded(self, model_path: str) -> Any:
+        if self._loaded_model is None or self._loaded_model_path != model_path:
+            if self._loaded_model is not None:
+                # Release reference so GC + llama-cpp can free GPU memory.
+                self._loaded_model = None
+            self._loaded_model = Llama(
+                model_path=model_path,
+                n_ctx=8192,
+                n_gpu_layers=-1,
+                verbose=False,
+            )
+            self._loaded_model_path = model_path
+        return self._loaded_model
+
+    def chat(
+        self,
+        model_path: str,
+        system: str,
+        user: str,
+        schema_id: str,
+        temperature: float,
+        max_tokens: int,
+    ) -> dict[str, Any]:
+        model = self._ensure_loaded(model_path)
+        grammar = self._grammar(schema_id)
+        out = model.create_chat_completion(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            grammar=grammar,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        text = out["choices"][0]["message"]["content"]
+        return {
+            "json": json.loads(text),
+            "usage": out.get("usage", {}),
+        }

@@ -74,6 +74,9 @@ class Server:
         if method == "llm_download_model":
             self._start_llm_download(msg, outbound)
             return
+        if method == "llm_chat":
+            self._start_llm_chat(msg, outbound)
+            return
         # Unknown method
         outbound.put(
             {
@@ -215,6 +218,52 @@ class Server:
                     "id": job_id,
                     "error": {
                         "code": "llm_download_failed",
+                        "message": f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
+                    },
+                }
+            )
+        finally:
+            with self._lock:
+                if self._active_job_id == job_id:
+                    self._active_job_id = None
+
+    def _start_llm_chat(self, msg: dict, outbound: Queue) -> None:
+        with self._lock:
+            if self._worker is not None and self._worker.is_alive():
+                outbound.put(
+                    {
+                        "id": msg.get("id"),
+                        "error": {"code": "busy", "message": "another long-running job is in progress"},
+                    }
+                )
+                return
+            job_id = str(msg.get("id"))
+            self._active_job_id = job_id
+            self._cancel_event.clear()
+            self._worker = threading.Thread(
+                target=self._run_llm_chat,
+                args=(job_id, msg.get("params") or {}, outbound),
+                daemon=True,
+            )
+            self._worker.start()
+
+    def _run_llm_chat(self, job_id: str, params: dict, outbound: Queue) -> None:
+        try:
+            result = self._llm_engine.chat(
+                model_path=params.get("modelPath", ""),
+                system=params.get("system", ""),
+                user=params.get("user", ""),
+                schema_id=params.get("schemaId", "highlights"),
+                temperature=float(params.get("temperature", 0.7)),
+                max_tokens=int(params.get("maxTokens", 4096)),
+            )
+            outbound.put({"id": job_id, "result": result})
+        except Exception as e:
+            outbound.put(
+                {
+                    "id": job_id,
+                    "error": {
+                        "code": "llm_chat_failed",
                         "message": f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
                     },
                 }

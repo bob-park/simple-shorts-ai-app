@@ -94,3 +94,64 @@ def test_download_model_cleans_up_partial_on_exception(tmp_path, monkeypatch):
     # Neither final nor partial should remain
     assert not os.path.exists(model_path)
     assert not os.path.exists(partial_dir)
+
+
+def test_highlights_grammar_compiles():
+    """Grammar string must be a valid GBNF that llama-cpp's parser accepts."""
+    from llama_cpp import LlamaGrammar
+    from shorts_sidecar.llm_engine import HIGHLIGHTS_GBNF
+    # Should not raise
+    grammar = LlamaGrammar.from_string(HIGHLIGHTS_GBNF)
+    assert grammar is not None
+
+
+def test_chat_loads_model_once_for_repeated_calls(tmp_path, monkeypatch):
+    """Two chat calls with the same model path should reuse the cached Llama instance."""
+    engine = LlmEngine()
+    fake_model_path = str(tmp_path / "model.gguf")
+    Path(fake_model_path).write_bytes(b"x")  # llama-cpp won't actually load this; we monkeypatch
+
+    construct_count = 0
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            nonlocal construct_count
+            construct_count += 1
+        def create_chat_completion(self, **kwargs):
+            return {
+                "choices": [{"message": {"content": '{"highlights":[]}'}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            }
+
+    import shorts_sidecar.llm_engine as eng
+    monkeypatch.setattr(eng, "Llama", FakeLlama)
+
+    r1 = engine.chat(model_path=fake_model_path, system="s", user="u", schema_id="highlights",
+                    temperature=0.7, max_tokens=128)
+    r2 = engine.chat(model_path=fake_model_path, system="s", user="u", schema_id="highlights",
+                    temperature=0.7, max_tokens=128)
+    assert r1["json"] == {"highlights": []}
+    assert r2["json"] == {"highlights": []}
+    assert construct_count == 1, "model should be loaded once"
+
+
+def test_chat_reloads_model_when_path_changes(tmp_path, monkeypatch):
+    engine = LlmEngine()
+    p1 = str(tmp_path / "a.gguf")
+    p2 = str(tmp_path / "b.gguf")
+    Path(p1).write_bytes(b"x")
+    Path(p2).write_bytes(b"x")
+
+    construct_count = 0
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            nonlocal construct_count
+            construct_count += 1
+        def create_chat_completion(self, **kwargs):
+            return {"choices": [{"message": {"content": '{"highlights":[]}'}}], "usage": {}}
+
+    import shorts_sidecar.llm_engine as eng
+    monkeypatch.setattr(eng, "Llama", FakeLlama)
+
+    engine.chat(model_path=p1, system="s", user="u", schema_id="highlights", temperature=0.7, max_tokens=128)
+    engine.chat(model_path=p2, system="s", user="u", schema_id="highlights", temperature=0.7, max_tokens=128)
+    assert construct_count == 2

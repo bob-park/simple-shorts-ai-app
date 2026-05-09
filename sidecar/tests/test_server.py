@@ -259,3 +259,37 @@ def test_dispatches_llm_download_model_emits_progress_then_result():
     assert progress_msgs[1]["params"]["jobId"] == "llm-download"
     # One final ok result
     assert {"id": "d1", "result": {"ok": True}} in result_msgs
+
+
+def test_dispatches_llm_chat_to_engine():
+    class StubLlm:
+        def chat(self, **kwargs):
+            return {
+                "json": {"highlights": [{"segment_indices": [0, 1], "title": "T", "hook": "H"}]},
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+            }
+        def model_status(self, *_):
+            return {"exists": True, "sizeBytes": 0, "loaded": False}
+
+    inbound, outbound = _run_server_with([
+        {
+            "id": "c1",
+            "method": "llm_chat",
+            "params": {
+                "modelPath": "/tmp/m.gguf",
+                "system": "s",
+                "user": "u",
+                "schemaId": "highlights",
+                "temperature": 0.7,
+                "maxTokens": 1024,
+            },
+        }
+    ])
+    server = Server(engine=StubEngine([]), llm_engine=StubLlm())
+    server.run(inbound, outbound)
+    msgs = _drain(outbound)
+    result_msgs = [m for m in msgs if m.get("id") == "c1"]
+    assert len(result_msgs) == 1
+    assert result_msgs[0]["result"]["json"] == {
+        "highlights": [{"segment_indices": [0, 1], "title": "T", "hook": "H"}]
+    }
