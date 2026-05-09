@@ -55,6 +55,9 @@ function installApiMock(overrides?: Partial<Window['api']>) {
     extractHighlights: calls.extractHighlights,
     cancelExtract: vi.fn(async () => undefined),
     onExtractProgress: vi.fn(() => () => undefined),
+    renderShorts: vi.fn(async () => ({ outputDir: '/tmp/out', results: [] })),
+    cancelRender: vi.fn(async () => undefined),
+    onRenderProgress: vi.fn(() => () => undefined),
     openPath: vi.fn(async () => undefined),
     ...overrides,
   };

@@ -1,5 +1,6 @@
 import type { ExtractProgress } from '@shared/extract';
 import type { AppApi } from '@shared/ipc';
+import type { RenderProgress } from '@shared/render';
 import type { Settings } from '@shared/settings';
 import type { TranscribeProgress } from '@shared/transcribe';
 import type { DownloadProgress } from '@shared/youtube';
@@ -47,6 +48,16 @@ const api: AppApi = {
     ipcRenderer.on('extract:progress', handler);
     return () => {
       ipcRenderer.off('extract:progress', handler);
+    };
+  },
+
+  renderShorts: (audioPath: string) => ipcRenderer.invoke('render:run', audioPath),
+  cancelRender: () => ipcRenderer.invoke('render:cancel'),
+  onRenderProgress: (callback: (p: RenderProgress) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, data: RenderProgress) => callback(data);
+    ipcRenderer.on('render:progress', handler);
+    return () => {
+      ipcRenderer.off('render:progress', handler);
     };
   },
 
