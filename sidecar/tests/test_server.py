@@ -8,6 +8,22 @@ import pytest
 
 from shorts_sidecar.server import Server
 from shorts_sidecar.whisper_engine import TranscribeProgress, TranscribeResult
+from shorts_sidecar.face_tracker import TrackFrame, TrackResult
+
+
+class StubTracker:
+    def __init__(self, result):
+        self._result = result
+        self.last_args: dict | None = None
+
+    def track(self, video_path, *, fps_sample, start_sec, end_sec):
+        self.last_args = {
+            "video_path": video_path,
+            "fps_sample": fps_sample,
+            "start_sec": start_sec,
+            "end_sec": end_sec,
+        }
+        return self._result
 
 
 class StubEngine:
@@ -132,3 +148,67 @@ def test_unknown_method_returns_error():
     msgs = _drain(outbound)
     err = [m for m in msgs if m.get("id") == "1" and "error" in m]
     assert err and err[0]["error"]["code"] == "unknown_method"
+
+
+def test_track_faces_returns_source_dimensions_and_frames():
+    tracker = StubTracker(
+        TrackResult(
+            source_width=1920,
+            source_height=1080,
+            frames=[TrackFrame(t=0.0, cx=960.0, cy=540.0), TrackFrame(t=0.5, cx=970.0, cy=545.0)],
+        )
+    )
+    inbound, outbound = _run_server_with(
+        [
+            {
+                "id": "abc",
+                "method": "track_faces",
+                "params": {
+                    "video_path": "/x.mp4",
+                    "fps_sample": 2.0,
+                    "start_sec": 5.0,
+                    "end_sec": 35.0,
+                },
+            }
+        ]
+    )
+    server = Server(engine=StubEngine([]), face_tracker=tracker)
+    server.run(inbound, outbound)
+    msgs = _drain(outbound)
+    final = [m for m in msgs if m.get("id") == "abc" and "result" in m]
+    assert len(final) == 1
+    payload = final[0]["result"]
+    assert payload["sourceWidth"] == 1920
+    assert payload["sourceHeight"] == 1080
+    assert len(payload["frames"]) == 2
+    assert payload["frames"][0] == {"t": 0.0, "cx": 960.0, "cy": 540.0}
+    assert tracker.last_args == {
+        "video_path": "/x.mp4",
+        "fps_sample": 2.0,
+        "start_sec": 5.0,
+        "end_sec": 35.0,
+    }
+
+
+def test_track_faces_returns_empty_frames_when_no_faces_detected():
+    tracker = StubTracker(TrackResult(source_width=1920, source_height=1080, frames=[]))
+    inbound, outbound = _run_server_with(
+        [
+            {
+                "id": "abc",
+                "method": "track_faces",
+                "params": {
+                    "video_path": "/x.mp4",
+                    "fps_sample": 2.0,
+                    "start_sec": 0.0,
+                    "end_sec": 10.0,
+                },
+            }
+        ]
+    )
+    server = Server(engine=StubEngine([]), face_tracker=tracker)
+    server.run(inbound, outbound)
+    msgs = _drain(outbound)
+    final = [m for m in msgs if m.get("id") == "abc" and "result" in m]
+    assert len(final) == 1
+    assert final[0]["result"]["frames"] == []
