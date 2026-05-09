@@ -61,11 +61,10 @@ beforeAll(() => {
 });
 
 describe('App shell', () => {
-  it('renders the sidebar with all four nav items', () => {
+  it('renders the sidebar with all three nav items', () => {
     render(<App />);
     expect(screen.getByRole('navigation', { name: '주 내비게이션' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '새 작업' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '작업 중' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '히스토리' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '설정' })).toBeInTheDocument();
   });
