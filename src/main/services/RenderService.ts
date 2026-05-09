@@ -262,6 +262,10 @@ function appendSubtitleFilter(args: readonly string[], assPath: string): string[
   const out = [...args];
   const vfIndex = out.indexOf('-vf');
   if (vfIndex === -1) return out;
-  out[vfIndex + 1] = `${out[vfIndex + 1]},subtitles=filename=${assPath}`;
+  // Single-quote the path so ffmpeg's filter parser tolerates spaces (very
+  // common on macOS where users have spaces in their home dir / Documents
+  // path). Single quotes inside the path are filesystem-illegal on macOS, so
+  // no inner-escape is needed.
+  out[vfIndex + 1] = `${out[vfIndex + 1]},subtitles=filename='${assPath}'`;
   return out;
 }

@@ -372,7 +372,7 @@ describe('RenderService with subtitles', () => {
     // ffmpeg filter chain ends with subtitles=filename=<path>
     const args: string[] = run.mock.calls[0]![0].args;
     const vfIndex = args.indexOf('-vf');
-    expect(args[vfIndex + 1]).toContain('crop=ih*9/16:ih,scale=1080:1920,subtitles=filename=/tmp/out/short_1.ass');
+    expect(args[vfIndex + 1]).toContain("crop=ih*9/16:ih,scale=1080:1920,subtitles=filename='/tmp/out/short_1.ass'");
 
     // RenderClipResult.subtitles populated
     expect(result.results[0]!.subtitles).toEqual({ cues: 1, assPath: '/tmp/out/short_1.ass' });
@@ -422,5 +422,27 @@ describe('RenderService with subtitles', () => {
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
     expect(result.results[0]!.subtitles).toBeNull();
+  });
+
+  it('single-quotes the .ass path in the filter so paths with spaces work (macOS)', async () => {
+    const writeFile = vi.fn(async (_path: string, _content: string, _enc?: string) => undefined);
+    const fs = { writeFile };
+    const service = new RenderService(runner as never, { fs: fs as never });
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+
+    const promise = service.render({
+      sourcePath: '/tmp/in.mp4',
+      // Path with a literal space — common on macOS user folders.
+      outputDir: '/Users/Bob Smith/Movies',
+      highlights: [fakeHighlight(1, 0, 30)],
+      transcriptWords: fakeWords([{ text: 'hi', start: 0, end: 0.5 }]),
+      subtitleOptions: SUBTITLE_OPTS,
+    });
+    h._resolve();
+    await promise;
+
+    const args: string[] = run.mock.calls[0]![0].args;
+    expect(args[args.indexOf('-vf') + 1]).toContain("subtitles=filename='/Users/Bob Smith/Movies/short_1.ass'");
   });
 });
