@@ -1,15 +1,20 @@
 import { DownloadProgress } from '@renderer/components/newjob/DownloadProgress';
+import { HighlightCard } from '@renderer/components/newjob/HighlightCard';
 import { PreviewCard } from '@renderer/components/newjob/PreviewCard';
 import { TranscribeCard } from '@renderer/components/newjob/TranscribeCard';
 import { UrlInput } from '@renderer/components/newjob/UrlInput';
 import { useDownload } from '@renderer/hooks/useDownload';
+import { useHighlights } from '@renderer/hooks/useHighlights';
 import { useTranscribe } from '@renderer/hooks/useTranscribe';
 import { useVideoPreview } from '@renderer/hooks/useVideoPreview';
+import { useNavigate } from 'react-router-dom';
 
 export function NewJobPage() {
   const preview = useVideoPreview();
   const download = useDownload();
   const transcribe = useTranscribe();
+  const highlights = useHighlights();
+  const navigate = useNavigate();
 
   const downloadInFlight = download.status === 'starting' || download.status === 'downloading';
 
@@ -84,15 +89,56 @@ export function NewJobPage() {
             />
           ) : null}
           {transcribe.state.status === 'done' ? (
-            <TranscribeCard
-              status="done"
-              transcriptPath={transcribe.state.transcriptPath}
-              transcript={transcribe.state.transcript}
-              onOpen={() => {
-                if (transcribe.state.status === 'done') void window.api.openPath(transcribe.state.transcriptPath);
-              }}
-              onReset={() => transcribe.reset()}
-            />
+            <>
+              <TranscribeCard
+                status="done"
+                transcriptPath={transcribe.state.transcriptPath}
+                transcript={transcribe.state.transcript}
+                onOpen={() => {
+                  if (transcribe.state.status === 'done') void window.api.openPath(transcribe.state.transcriptPath);
+                }}
+                onReset={() => {
+                  transcribe.reset();
+                  highlights.reset();
+                }}
+              />
+              {highlights.state.status === 'probing' ? <HighlightCard status="probing" /> : null}
+              {highlights.state.status === 'missing-key' ? (
+                <HighlightCard status="missing-key" onOpenSettings={() => navigate('/settings')} />
+              ) : null}
+              {highlights.state.status === 'idle' ? (
+                <HighlightCard
+                  status="idle"
+                  onStart={() => {
+                    if (transcribe.state.status === 'done') void highlights.start(transcribe.state.audioPath);
+                  }}
+                />
+              ) : null}
+              {highlights.state.status === 'extracting' ? (
+                <HighlightCard
+                  status="extracting"
+                  progress={highlights.state.progress}
+                  onCancel={() => void highlights.cancel()}
+                />
+              ) : null}
+              {highlights.state.status === 'done' ? (
+                <HighlightCard
+                  status="done"
+                  highlightsPath={highlights.state.highlightsPath}
+                  highlightSet={highlights.state.highlightSet}
+                  onOpenJson={() => {
+                    if (highlights.state.status === 'done') void window.api.openPath(highlights.state.highlightsPath);
+                  }}
+                  onReset={() => highlights.reset()}
+                />
+              ) : null}
+              {highlights.state.status === 'canceled' ? (
+                <HighlightCard status="canceled" onReset={() => highlights.reset()} />
+              ) : null}
+              {highlights.state.status === 'error' ? (
+                <HighlightCard status="error" error={highlights.state.error} onReset={() => highlights.reset()} />
+              ) : null}
+            </>
           ) : null}
           {transcribe.state.status === 'canceled' ? (
             <TranscribeCard status="canceled" onReset={() => transcribe.reset()} />
