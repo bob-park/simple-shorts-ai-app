@@ -30,7 +30,13 @@ function installApiMock(overrides?: Partial<Window['api']>) {
         generatedAt: '2026-05-09T00:00:00Z',
         model: 'm',
         audioPath: '/tmp/dQw4w9WgXcQ.mp4',
-        highlights: [{ start_sec: 0, end_sec: 30, title: 'Opener', hook: 'Strong start' }],
+        highlights: [
+          {
+            segments: [{ start_sec: 0, end_sec: 30 }],
+            title: 'Opener',
+            hook: 'Strong start',
+          },
+        ],
       },
     })),
     renderShorts: vi.fn(async () => ({
@@ -41,6 +47,7 @@ function installApiMock(overrides?: Partial<Window['api']>) {
           title: 'Opener',
           startSec: 0,
           endSec: 30,
+          montageDurationSec: 30,
           status: 'done' as const,
           outputPath: '/tmp/Me at the zoo/short_1.mp4',
         },

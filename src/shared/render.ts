@@ -13,6 +13,12 @@ export const RenderClipResultSchema = z.object({
   startSec: z.number().nonnegative(),
   /** Original highlight end, seconds. */
   endSec: z.number().nonnegative(),
+  /**
+   * Sum of segment durations — the actual length of the rendered .mp4. May
+   * differ from `endSec - startSec` for multi-segment montage highlights where
+   * the coarse `[startSec, endSec]` is much wider than the played duration.
+   */
+  montageDurationSec: z.number().nonnegative(),
   /** Discriminates success vs failure for this specific clip. */
   status: z.enum(['done', 'failed', 'canceled']),
   /** Absolute path of the produced .mp4 (only when status==='done'). */

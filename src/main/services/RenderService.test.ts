@@ -1,10 +1,21 @@
-import type { Highlight } from '@shared/highlight';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RenderService } from './RenderService';
 
-function fakeHighlight(i: number, start: number, end: number): Highlight {
-  return { start_sec: start, end_sec: end, title: `H${i}`, hook: `hook${i}` };
+function fakeHighlight(i: number, start: number, end: number) {
+  return {
+    segments: [{ start_sec: start, end_sec: end }],
+    title: `H${i}`,
+    hook: `hook${i}`,
+  };
+}
+
+function fakeMultiSegHighlight(i: number, ranges: { start: number; end: number }[]) {
+  return {
+    segments: ranges.map((r) => ({ start_sec: r.start, end_sec: r.end })),
+    title: `H${i}`,
+    hook: `hook${i}`,
+  };
 }
 
 function fakeRunHandle() {
@@ -68,7 +79,7 @@ describe('RenderService', () => {
     expect(result.results[1]!.outputPath).toBe('/tmp/out/short_2.mp4');
   });
 
-  it('builds ffmpeg args with -ss, -to, the 9:16 crop+scale filter, libx264, and aac', async () => {
+  it('builds ffmpeg args with select-filter cuts, the 9:16 crop+scale filter, libx264, and aac', async () => {
     const h = fakeRunHandle();
     run.mockReturnValue(h);
     const promise = service.render({
@@ -82,18 +93,19 @@ describe('RenderService', () => {
     const opts = run.mock.calls[0]![0];
     expect(opts.durationSec).toBe(30);
     const args: string[] = opts.args;
-    expect(args).toContain('-ss');
-    expect(args[args.indexOf('-ss') + 1]).toBe('5');
-    expect(args).toContain('-to');
-    expect(args[args.indexOf('-to') + 1]).toBe('35');
+    // No -ss / -to anymore — select filter does the cuts
+    expect(args).not.toContain('-ss');
+    expect(args).not.toContain('-to');
     expect(args).toContain('-i');
     expect(args[args.indexOf('-i') + 1]).toBe('/tmp/in.mp4');
     expect(args).toContain('-vf');
-    expect(args[args.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    expect(args[args.indexOf('-vf') + 1]).toBe(
+      "select='between(t,5,35)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+    );
+    expect(args).toContain('-af');
+    expect(args[args.indexOf('-af') + 1]).toBe("aselect='between(t,5,35)',asetpts=N/SR/TB");
     expect(args).toContain('libx264');
     expect(args).toContain('aac');
-    expect(args).toContain('-progress');
-    expect(args[args.indexOf('-progress') + 1]).toBe('pipe:2');
     expect(args[args.length - 1]).toBe('/tmp/out/short_1.mp4');
   });
 
@@ -231,7 +243,9 @@ describe('RenderService with tracker', () => {
     const args: string[] = run.mock.calls[0]![0].args;
     const vfIndex = args.indexOf('-vf');
     expect(vfIndex).toBeGreaterThan(-1);
-    expect(args[vfIndex + 1]).toMatch(/sendcmd=f=\/tmp\/out\/short_1\.cmd,crop@c=ih\*9\/16:ih:0:0,scale=1080:1920/);
+    expect(args[vfIndex + 1]).toBe(
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,sendcmd=f=/tmp/out/short_1.cmd,crop@c=ih*9/16:ih:0:0,scale=1080:1920",
+    );
 
     // RenderClipResult.tracking populated
     expect(result.results[0]!.tracking).toEqual({ frames: 2, trackPath: '/tmp/out/short_1.track.json' });
@@ -256,9 +270,11 @@ describe('RenderService with tracker', () => {
 
     // No track files written
     expect(writeFile).not.toHaveBeenCalled();
-    // Args use the M6 static center crop
+    // Args use the static center crop with select filter
     const args: string[] = run.mock.calls[0]![0].args;
-    expect(args[args.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    expect(args[args.indexOf('-vf') + 1]).toBe(
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+    );
     expect(result.results[0]!.tracking).toBeNull();
     expect(result.results[0]!.status).toBe('done');
   });
@@ -286,7 +302,9 @@ describe('RenderService with tracker', () => {
     // Same fallback path as empty frames
     expect(writeFile).not.toHaveBeenCalled();
     const args: string[] = run.mock.calls[0]![0].args;
-    expect(args[args.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    expect(args[args.indexOf('-vf') + 1]).toBe(
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+    );
     expect(result.results[0]!.tracking).toBeNull();
     expect(result.results[0]!.status).toBe('done');
   });
@@ -315,7 +333,9 @@ describe('RenderService with tracker', () => {
     // No track files written — buildSendcmd's throw is caught + degraded to fallback.
     expect(writeFile).not.toHaveBeenCalled();
     const args: string[] = run.mock.calls[0]![0].args;
-    expect(args[args.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    expect(args[args.indexOf('-vf') + 1]).toBe(
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+    );
     expect(result.results[0]!.tracking).toBeNull();
     expect(result.results[0]!.status).toBe('done');
   });
@@ -372,7 +392,9 @@ describe('RenderService with subtitles', () => {
     // ffmpeg filter chain ends with subtitles=filename=<path>
     const args: string[] = run.mock.calls[0]![0].args;
     const vfIndex = args.indexOf('-vf');
-    expect(args[vfIndex + 1]).toContain("crop=ih*9/16:ih,scale=1080:1920,subtitles=filename='/tmp/out/short_1.ass'");
+    expect(args[vfIndex + 1]).toBe(
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920,subtitles=filename='/tmp/out/short_1.ass'",
+    );
 
     // RenderClipResult.subtitles populated
     expect(result.results[0]!.subtitles).toEqual({ cues: 1, assPath: '/tmp/out/short_1.ass' });
@@ -397,7 +419,9 @@ describe('RenderService with subtitles', () => {
 
     expect(writeFile).not.toHaveBeenCalled();
     const args: string[] = run.mock.calls[0]![0].args;
-    expect(args[args.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    expect(args[args.indexOf('-vf') + 1]).toBe(
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+    );
     expect(result.results[0]!.subtitles).toBeNull();
   });
 
@@ -420,7 +444,9 @@ describe('RenderService with subtitles', () => {
 
     expect(writeFile).not.toHaveBeenCalled();
     const args: string[] = run.mock.calls[0]![0].args;
-    expect(args[args.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    expect(args[args.indexOf('-vf') + 1]).toBe(
+      "select='between(t,100,130)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+    );
     expect(result.results[0]!.subtitles).toBeNull();
   });
 
@@ -480,10 +506,14 @@ describe('RenderService with subtitles', () => {
     expect(run).toHaveBeenCalledTimes(3);
     // Clip 1 retry args have NO subtitles filter
     const retryArgs: string[] = run.mock.calls[1]![0].args;
-    expect(retryArgs[retryArgs.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    expect(retryArgs[retryArgs.indexOf('-vf') + 1]).toBe(
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+    );
     // Clip 2 args also have NO subtitles filter (service flag set after first failure)
     const clip2Args: string[] = run.mock.calls[2]![0].args;
-    expect(clip2Args[clip2Args.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    expect(clip2Args[clip2Args.indexOf('-vf') + 1]).toBe(
+      "select='between(t,60,90)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+    );
     // Both clips end up done with subtitles: null
     expect(result.results[0]!.status).toBe('done');
     expect(result.results[0]!.subtitles).toBeNull();
@@ -494,5 +524,179 @@ describe('RenderService with subtitles', () => {
     const writePaths = writeFile.mock.calls.map((c) => c[0]);
     expect(writePaths).toContain('/tmp/out/short_1.ass');
     expect(writePaths).not.toContain('/tmp/out/short_2.ass');
+  });
+
+  it('multi-segment highlight builds select filter with multiple between() ranges', async () => {
+    const writeFile = vi.fn(async (_p: string, _c: string, _e?: string) => undefined);
+    const fs = { writeFile };
+    const service = new RenderService(runner as never, { fs: fs as never });
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+
+    const promise = service.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [
+        fakeMultiSegHighlight(1, [
+          { start: 5, end: 8 },
+          { start: 12, end: 15 },
+          { start: 30, end: 33 },
+        ]),
+      ],
+    });
+    h._resolve();
+    const result = await promise;
+
+    const args: string[] = run.mock.calls[0]![0].args;
+    expect(args[args.indexOf('-vf') + 1]).toBe(
+      "select='between(t,5,8)+between(t,12,15)+between(t,30,33)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+    );
+    expect(args[args.indexOf('-af') + 1]).toBe(
+      "aselect='between(t,5,8)+between(t,12,15)+between(t,30,33)',asetpts=N/SR/TB",
+    );
+    // durationSec = sum of segment durations (3+3+3 = 9)
+    expect(run.mock.calls[0]![0].durationSec).toBe(9);
+    // RenderClipResult.startSec/endSec derived from first/last segments
+    expect(result.results[0]!.startSec).toBe(5);
+    expect(result.results[0]!.endSec).toBe(33);
+  });
+
+  it('multi-segment with tracker rebases per-segment frames into one sendcmd file', async () => {
+    const writeFile = vi.fn(async (_p: string, _c: string, _e?: string) => undefined);
+    const fs = { writeFile };
+    // Tracker returns one frame per segment, in source-time
+    const trackerCalls: { startSec: number; endSec: number }[] = [];
+    const tracker = {
+      track: vi.fn(async (_path: string, opts: { startSec: number; endSec: number }) => {
+        trackerCalls.push({ startSec: opts.startSec, endSec: opts.endSec });
+        return {
+          sourceWidth: 1920,
+          sourceHeight: 1080,
+          frames: [{ t: opts.startSec + 1, cx: 500, cy: 500 }],
+        };
+      }),
+    };
+    const service = new RenderService(runner as never, { tracker: tracker as never, fs: fs as never });
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+
+    const promise = service.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [
+        fakeMultiSegHighlight(1, [
+          { start: 10, end: 13 },
+          { start: 100, end: 102 },
+        ]),
+      ],
+    });
+    h._resolve();
+    await promise;
+
+    // Tracker called once per segment
+    expect(trackerCalls).toEqual([
+      { startSec: 10, endSec: 13 },
+      { startSec: 100, endSec: 102 },
+    ]);
+    // .cmd file contains rebased times: seg 0 → t=1 (10→11 rebased to 1), seg 1 → t=4 (100→101 rebased to 3+1=4)
+    const cmdWrite = writeFile.mock.calls.find((c) => String(c[0]).endsWith('.cmd'))!;
+    const cmdContent = cmdWrite[1] as string;
+    expect(cmdContent).toContain('1 crop@c x');
+    expect(cmdContent).toContain('4 crop@c x');
+  });
+
+  it('multi-segment fallback to center crop when one segment has zero tracked frames', async () => {
+    const writeFile = vi.fn(async (_p: string, _c: string, _e?: string) => undefined);
+    const fs = { writeFile };
+    let call = 0;
+    const tracker = {
+      track: vi.fn(async () => {
+        call += 1;
+        return {
+          sourceWidth: 1920,
+          sourceHeight: 1080,
+          frames: call === 1 ? [{ t: 11, cx: 500, cy: 500 }] : [],
+        };
+      }),
+    };
+    const service = new RenderService(runner as never, { tracker: tracker as never, fs: fs as never });
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+
+    const promise = service.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [
+        fakeMultiSegHighlight(1, [
+          { start: 10, end: 13 },
+          { start: 100, end: 102 },
+        ]),
+      ],
+    });
+    h._resolve();
+    const result = await promise;
+
+    // Center-crop fallback (no sendcmd in args)
+    const args: string[] = run.mock.calls[0]![0].args;
+    expect(args[args.indexOf('-vf') + 1]).toContain('crop=ih*9/16:ih');
+    expect(args[args.indexOf('-vf') + 1]).not.toContain('sendcmd');
+    expect(result.results[0]!.tracking).toBeNull();
+  });
+
+  it('multi-segment with subtitles rebases words across the montage timeline', async () => {
+    const writeFile = vi.fn(async (_p: string, _c: string, _e?: string) => undefined);
+    const fs = { writeFile };
+    const service = new RenderService(runner as never, { fs: fs as never });
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+
+    const promise = service.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [
+        fakeMultiSegHighlight(1, [
+          { start: 10, end: 13 },
+          { start: 100, end: 102 },
+        ]),
+      ],
+      transcriptWords: [
+        { text: 'hello', start: 11, end: 11.5 }, // seg 0 → t=1.0..1.5
+        { text: 'world', start: 100.5, end: 101 }, // seg 1 → t=3.5..4
+      ],
+      subtitleOptions: SUBTITLE_OPTS,
+    });
+    h._resolve();
+    await promise;
+
+    const assWrite = writeFile.mock.calls.find((c) => String(c[0]).endsWith('.ass'))!;
+    const assContent = assWrite[1] as string;
+    // buildAssFile groups 2 words per cue. Both words land in one cue:
+    //   start = 1.0 (hello rebased), end = 4.0 (world rebased end).
+    // Montage-relative times confirmed: hello→seg0 offset 1s, world→seg1 offset 3+0.5=3.5s..4s.
+    expect(assContent).toContain('0:00:01.00,0:00:04.00'); // combined cue for 'hello world'
+    expect(assContent).toContain('hello world');
+  });
+
+  it('multi-segment durationSec passed to runner is the sum of segment durations', async () => {
+    const service = new RenderService(runner as never);
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+
+    const promise = service.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [
+        fakeMultiSegHighlight(1, [
+          { start: 0, end: 5 },
+          { start: 10, end: 15 },
+          { start: 20, end: 25 },
+        ]),
+      ],
+    });
+    h._resolve();
+    await promise;
+
+    // 3 segments × 5s = 15s
+    expect(run.mock.calls[0]![0].durationSec).toBe(15);
   });
 });

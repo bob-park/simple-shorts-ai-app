@@ -85,17 +85,21 @@ export function HighlightCard(props: Props) {
             하이라이트 {props.highlightSet.highlights.length}개 추출 완료
           </h3>
           <ol className="gap-sm flex flex-col">
-            {props.highlightSet.highlights.map((h: Highlight, i: number) => (
-              <li key={i} className="bg-surface p-md rounded-lg">
-                <p className="text-body-md text-ink font-semibold">
-                  #{i + 1} {h.title}{' '}
-                  <span className="text-body-sm text-slate font-normal">
-                    ({formatTime(h.start_sec)} – {formatTime(h.end_sec)})
-                  </span>
-                </p>
-                <p className="text-body-sm text-slate mt-xs">{h.hook}</p>
-              </li>
-            ))}
+            {props.highlightSet.highlights.map((h: Highlight, i: number) => {
+              const totalSec = h.segments.reduce((acc, s) => acc + (s.end_sec - s.start_sec), 0);
+              const isMulti = h.segments.length > 1;
+              const rangeLabel = isMulti
+                ? `${h.segments.length}개 세그먼트 · ${formatTime(totalSec)} 총길이`
+                : `${formatTime(h.segments[0]!.start_sec)} – ${formatTime(h.segments[0]!.end_sec)}`;
+              return (
+                <li key={i} className="bg-surface p-md rounded-lg">
+                  <p className="text-body-md text-ink font-semibold">
+                    #{i + 1} {h.title} <span className="text-body-sm text-slate font-normal">({rangeLabel})</span>
+                  </p>
+                  <p className="text-body-sm text-slate mt-xs">{h.hook}</p>
+                </li>
+              );
+            })}
           </ol>
           <p className="text-body-sm text-slate break-all">{props.highlightsPath}</p>
           <div className="gap-sm flex">

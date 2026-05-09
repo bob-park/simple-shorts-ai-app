@@ -1,10 +1,11 @@
-import type { Highlight } from '@shared/highlight';
+import type { Highlight, HighlightSegment } from '@shared/highlight';
 import type { RenderClipResult, RenderProgress, RenderResult } from '@shared/render';
 import type { TrackResult } from '@shared/track';
 import type { Word } from '@shared/transcript';
 import { promises as fsPromises } from 'node:fs';
 import { join } from 'node:path';
 
+import { rebaseTrackingFrames, rebaseTranscriptWords } from './MontageHelpers';
 import { buildSendcmd } from './SendcmdGenerator';
 import { type SubtitleStyle, buildAssFile } from './SubtitleGenerator';
 
@@ -41,27 +42,10 @@ export interface RenderOptions {
 
 type ProgressHandler = (p: RenderProgress) => void;
 
-const CENTER_CROP_FILTER = 'crop=ih*9/16:ih,scale=1080:1920';
-
-/**
- * Walks a highlights array sequentially, producing one .mp4 per highlight.
- * - If a tracker is configured, each clip is face-tracked and rendered with
- *   a dynamic sendcmd-driven crop. If tracking returns no frames or throws,
- *   the clip falls back to the M6 static center crop and its `tracking` field
- *   is `null`.
- * - Cancel aborts the active ffmpeg child + marks queue tail as 'canceled'.
- * - A failed clip (ffmpeg error) is recorded and the queue continues.
- */
 export class RenderService {
   private progressHandlers: ProgressHandler[] = [];
   private activeHandle: ReturnType<RunnerLike['run']> | null = null;
   private canceled = false;
-  /**
-   * Set to true the first time ffmpeg fails with "No such filter: 'subtitles'"
-   * — meaning the user's ffmpeg lacks libass. Subsequent clips skip subtitle
-   * generation entirely so we don't pay the failed-render penalty per clip.
-   * Resets on every render() call so a future ffmpeg upgrade is picked up.
-   */
   private subtitlesUnavailable = false;
   private readonly tracker?: TrackerLike;
   private readonly fs: FsLike;
@@ -100,16 +84,16 @@ export class RenderService {
         continue;
       }
       const outputPath = join(opts.outputDir, `short_${clipIndex}.mp4`);
-      const durationSec = h.end_sec - h.start_sec;
+      const durationSec = h.segments.reduce((acc, s) => acc + (s.end_sec - s.start_sec), 0);
 
       const trackingInfo = this.tracker ? await this.maybeTrackAndPersist(opts, h, clipIndex) : null;
       const baseArgs =
         trackingInfo !== null
-          ? buildTrackedArgs(opts.sourcePath, h, outputPath, trackingInfo.cmdPath)
-          : buildCenterArgs(opts.sourcePath, h, outputPath);
+          ? buildTrackedArgs(opts.sourcePath, h.segments, outputPath, trackingInfo.cmdPath)
+          : buildCenterArgs(opts.sourcePath, h.segments, outputPath);
       const subtitlesInfo =
         opts.subtitleOptions && opts.transcriptWords && !this.subtitlesUnavailable
-          ? await this.maybeWriteSubtitles(opts, h, clipIndex)
+          ? await this.maybeWriteSubtitles(opts, h, clipIndex, durationSec)
           : null;
       const args = subtitlesInfo ? appendSubtitleFilter(baseArgs, subtitlesInfo.assPath) : baseArgs;
 
@@ -138,9 +122,6 @@ export class RenderService {
         if (this.canceled || /canceled/i.test(message)) {
           results.push(this.buildClipResult(clipIndex, h, 'canceled', undefined, 'Render canceled'));
         } else if (subtitlesInfo && /No such filter: ['"]subtitles['"]/.test(message)) {
-          // ffmpeg lacks libass. Flip the flag so subsequent clips skip
-          // subtitle generation entirely, then retry THIS clip without the
-          // subtitles filter so the user still gets the mp4.
           this.subtitlesUnavailable = true;
           this.activeHandle = null;
           const retryHandle = this.runner.run({ args: baseArgs, durationSec });
@@ -184,45 +165,56 @@ export class RenderService {
     clipIndex: number,
   ): Promise<{ cmdPath: string; trackPath: string; frameCount: number } | null> {
     if (!this.tracker) return null;
-    let track: TrackResult;
-    try {
-      track = await this.tracker.track(opts.sourcePath, {
-        startSec: h.start_sec,
-        endSec: h.end_sec,
-      });
-    } catch {
-      // Tracking failure is non-fatal — clip falls back to center crop.
-      return null;
+    const perSegmentResults: TrackResult[] = [];
+    let firstResult: TrackResult | null = null;
+    for (const seg of h.segments) {
+      try {
+        const r = await this.tracker.track(opts.sourcePath, {
+          startSec: seg.start_sec,
+          endSec: seg.end_sec,
+        });
+        if (firstResult === null) firstResult = r;
+        perSegmentResults.push(r);
+      } catch {
+        // Tracking failure on any segment is non-fatal — fall back to center crop.
+        return null;
+      }
     }
-    if (track.frames.length === 0) return null;
+    const allFrames = rebaseTrackingFrames(h.segments, perSegmentResults);
+    if (allFrames.length === 0 || firstResult === null) return null;
+
+    const aggregated: TrackResult = {
+      sourceWidth: firstResult.sourceWidth,
+      sourceHeight: firstResult.sourceHeight,
+      frames: allFrames,
+    };
     let cmdContent: string;
     try {
-      cmdContent = buildSendcmd(track, h.start_sec);
+      cmdContent = buildSendcmd(aggregated, 0);
     } catch {
-      // SendcmdGenerator throws when the source is already 9:16 or taller —
-      // M7's sendcmd-driven crop can't handle that geometry. Fall back to the
-      // M6 center-crop args (which also degenerates to a no-op for portrait
-      // sources, but at least doesn't crash the entire render job).
+      // Source too vertical for sendcmd — fall back to center crop.
       return null;
     }
     const cmdPath = join(opts.outputDir, `short_${clipIndex}.cmd`);
     const trackPath = join(opts.outputDir, `short_${clipIndex}.track.json`);
     await this.fs.writeFile(cmdPath, cmdContent, 'utf8');
-    await this.fs.writeFile(trackPath, JSON.stringify(track, null, 2), 'utf8');
-    return { cmdPath, trackPath, frameCount: track.frames.length };
+    await this.fs.writeFile(trackPath, JSON.stringify(aggregated, null, 2), 'utf8');
+    return { cmdPath, trackPath, frameCount: allFrames.length };
   }
 
   private async maybeWriteSubtitles(
     opts: RenderOptions,
     h: Highlight,
     clipIndex: number,
+    montageDuration: number,
   ): Promise<{ assPath: string; cueCount: number } | null> {
     if (!opts.subtitleOptions || !opts.transcriptWords) return null;
-    const assContent = buildAssFile(opts.transcriptWords, h.start_sec, h.end_sec, opts.subtitleOptions);
-    if (assContent === '') return null; // no words in window
+    const rebased = rebaseTranscriptWords(h.segments, opts.transcriptWords);
+    if (rebased.length === 0) return null;
+    const assContent = buildAssFile(rebased, 0, montageDuration, opts.subtitleOptions);
+    if (assContent === '') return null;
     const assPath = join(opts.outputDir, `short_${clipIndex}.ass`);
     await this.fs.writeFile(assPath, assContent, 'utf8');
-    // Cue count = number of Dialogue lines (one per cue).
     const cueCount = (assContent.match(/^Dialogue:/gm) ?? []).length;
     return { assPath, cueCount };
   }
@@ -239,8 +231,10 @@ export class RenderService {
     return {
       index,
       title: h.title,
-      startSec: h.start_sec,
-      endSec: h.end_sec,
+      // History persistence (M9): coarse range = first segment start..last segment end.
+      startSec: h.segments[0]!.start_sec,
+      endSec: h.segments[h.segments.length - 1]!.end_sec,
+      montageDurationSec: h.segments.reduce((acc, s) => acc + (s.end_sec - s.start_sec), 0),
       status,
       outputPath,
       error,
@@ -265,34 +259,47 @@ const COMMON_ENCODE_ARGS = [
   'pipe:2',
 ];
 
-function buildCenterArgs(sourcePath: string, h: Highlight, outputPath: string): string[] {
+function buildSelectExpr(segments: HighlightSegment[]): string {
+  return segments.map((s) => `between(t,${s.start_sec},${s.end_sec})`).join('+');
+}
+
+function buildVfChain(segments: HighlightSegment[], cropClause: string): string {
+  return `select='${buildSelectExpr(segments)}',setpts=N/FRAME_RATE/TB,${cropClause},scale=1080:1920`;
+}
+
+function buildAfChain(segments: HighlightSegment[]): string {
+  return `aselect='${buildSelectExpr(segments)}',asetpts=N/SR/TB`;
+}
+
+function buildCenterArgs(sourcePath: string, segments: HighlightSegment[], outputPath: string): string[] {
   return [
     '-y',
     '-i',
     sourcePath,
-    '-ss',
-    String(h.start_sec),
-    '-to',
-    String(h.end_sec),
     '-vf',
-    CENTER_CROP_FILTER,
+    buildVfChain(segments, 'crop=ih*9/16:ih'),
+    '-af',
+    buildAfChain(segments),
     ...COMMON_ENCODE_ARGS,
     outputPath,
   ];
 }
 
-function buildTrackedArgs(sourcePath: string, h: Highlight, outputPath: string, cmdPath: string): string[] {
-  const filter = `sendcmd=f=${cmdPath},crop@c=ih*9/16:ih:0:0,scale=1080:1920`;
+function buildTrackedArgs(
+  sourcePath: string,
+  segments: HighlightSegment[],
+  outputPath: string,
+  cmdPath: string,
+): string[] {
+  const cropClause = `sendcmd=f=${cmdPath},crop@c=ih*9/16:ih:0:0`;
   return [
     '-y',
     '-i',
     sourcePath,
-    '-ss',
-    String(h.start_sec),
-    '-to',
-    String(h.end_sec),
     '-vf',
-    filter,
+    buildVfChain(segments, cropClause),
+    '-af',
+    buildAfChain(segments),
     ...COMMON_ENCODE_ARGS,
     outputPath,
   ];
@@ -302,10 +309,7 @@ function appendSubtitleFilter(args: readonly string[], assPath: string): string[
   const out = [...args];
   const vfIndex = out.indexOf('-vf');
   if (vfIndex === -1) return out;
-  // Single-quote the path so ffmpeg's filter parser tolerates spaces (very
-  // common on macOS where users have spaces in their home dir / Documents
-  // path). Single quotes inside the path are filesystem-illegal on macOS, so
-  // no inner-escape is needed.
+  // Single-quote the path so ffmpeg's filter parser tolerates spaces.
   out[vfIndex + 1] = `${out[vfIndex + 1]},subtitles=filename='${assPath}'`;
   return out;
 }
