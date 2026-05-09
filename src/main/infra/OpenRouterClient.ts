@@ -71,8 +71,9 @@ export class OpenRouterClient {
     if (!content) {
       throw new Error('OpenRouter response had empty content');
     }
+    const cleaned = stripCodeFences(content);
     try {
-      return JSON.parse(content);
+      return JSON.parse(cleaned);
     } catch (e) {
       throw new Error(`OpenRouter returned non-JSON content: ${(e as Error).message}`);
     }
@@ -85,4 +86,20 @@ export class OpenRouterClient {
     this.cache.set(apiKey, sdk);
     return sdk;
   }
+}
+
+/**
+ * Strip a single outer ```json...``` or ```...``` markdown fence if present.
+ *
+ * Why: OpenRouter's `response_format: { type: 'json_object' }` is a passthrough
+ * hint to the underlying provider. OpenAI models honor it natively and return
+ * raw JSON. Anthropic Claude and many other models translate it into a system
+ * prompt addition; they often comply but sometimes wrap the JSON in markdown
+ * fences anyway (a strong bias from their training data). We strip the wrapper
+ * so the same parser path works regardless of provider.
+ */
+function stripCodeFences(content: string): string {
+  const trimmed = content.trim();
+  const match = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/.exec(trimmed);
+  return match ? match[1]!.trim() : trimmed;
 }

@@ -92,4 +92,52 @@ describe('OpenRouterClient', () => {
     await client.chatJson({ apiKey: 'k2', model: 'm', systemPrompt: 's', userPrompt: 'u' });
     expect(openaiCtor).toHaveBeenCalledTimes(2);
   });
+
+  it('strips ```json fenced code blocks before parsing (Claude/Gemini sometimes wrap)', async () => {
+    createCompletion.mockResolvedValue({
+      choices: [{ message: { content: '```json\n{"highlights":[]}\n```' } }],
+    });
+    const result = await client.chatJson({
+      apiKey: 'k',
+      model: 'm',
+      systemPrompt: 's',
+      userPrompt: 'u',
+    });
+    expect(result).toEqual({ highlights: [] });
+  });
+
+  it('strips bare ``` fenced code blocks before parsing', async () => {
+    createCompletion.mockResolvedValue({
+      choices: [{ message: { content: '```\n{"highlights":[{"a":1}]}\n```' } }],
+    });
+    const result = await client.chatJson({
+      apiKey: 'k',
+      model: 'm',
+      systemPrompt: 's',
+      userPrompt: 'u',
+    });
+    expect(result).toEqual({ highlights: [{ a: 1 }] });
+  });
+
+  it('tolerates trailing whitespace and newlines around the fence', async () => {
+    createCompletion.mockResolvedValue({
+      choices: [{ message: { content: '  \n```json\n{"x":1}\n```  \n' } }],
+    });
+    const result = await client.chatJson({
+      apiKey: 'k',
+      model: 'm',
+      systemPrompt: 's',
+      userPrompt: 'u',
+    });
+    expect(result).toEqual({ x: 1 });
+  });
+
+  it('still throws when content is neither raw JSON nor fenced JSON', async () => {
+    createCompletion.mockResolvedValue({
+      choices: [{ message: { content: 'I refuse to return JSON, here is prose instead.' } }],
+    });
+    await expect(client.chatJson({ apiKey: 'k', model: 'm', systemPrompt: 's', userPrompt: 'u' })).rejects.toThrow(
+      /json/i,
+    );
+  });
 });
