@@ -44,6 +44,12 @@ beforeAll(() => {
     cancelTranscribe: vi.fn(async () => undefined),
     onTranscribeProgress: vi.fn(() => () => undefined),
     sidecarHealth: vi.fn(async () => ({ ok: true, modelsLoaded: [] })),
+    extractHighlights: vi.fn(async () => ({
+      highlightsPath: '/tmp/x.highlights.json',
+      highlightSet: { generatedAt: '2026-05-09T00:00:00Z', model: 'm', audioPath: '/tmp/x', highlights: [] },
+    })),
+    cancelExtract: vi.fn(async () => undefined),
+    onExtractProgress: vi.fn(() => () => undefined),
     openPath: vi.fn(async () => undefined),
   } satisfies Window['api'];
 });
