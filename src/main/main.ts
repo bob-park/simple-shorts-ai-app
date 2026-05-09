@@ -2,7 +2,7 @@ import { HighlightSetSchema } from '@shared/highlight';
 import { HistoryListQuerySchema } from '@shared/history';
 import type { Settings } from '@shared/settings';
 import { TranscriptSchema, type Word } from '@shared/transcript';
-import { sanitizeFilename } from '@shared/youtube';
+import { VideoMetaSchema, sanitizeFilename } from '@shared/youtube';
 import Database from 'better-sqlite3';
 import { BrowserWindow, app, dialog, ipcMain, safeStorage, session, shell } from 'electron';
 import Store from 'electron-store';
@@ -413,7 +413,7 @@ void app.whenReady().then(() => {
       try {
         const metaPath = `${audioPath}.meta.json`;
         const metaRaw = await fsPromises.readFile(metaPath, 'utf8');
-        const meta = JSON.parse(metaRaw);
+        const meta = VideoMetaSchema.parse(JSON.parse(metaRaw));
         await getHistoryService().recordJob({
           meta,
           sourcePath: audioPath,
@@ -448,8 +448,17 @@ void app.whenReady().then(() => {
     return { job, shorts };
   });
 
-  ipcMain.handle('history:delete', (_e, jobId: string) => {
-    getHistoryRepo().deleteJob(jobId);
+  ipcMain.handle('history:delete', async (_e, jobId: string) => {
+    // Spec promises "delete + thumbnails" — read paths first, then delete the
+    // DB rows, then unlink the PNG files (best-effort; missing files = OK).
+    const repo = getHistoryRepo();
+    const shorts = repo.getShortsByJob(jobId);
+    repo.deleteJob(jobId);
+    for (const s of shorts) {
+      if (s.thumbPath) {
+        await fsPromises.unlink(s.thumbPath).catch(() => undefined);
+      }
+    }
   });
 
   createMainWindow();

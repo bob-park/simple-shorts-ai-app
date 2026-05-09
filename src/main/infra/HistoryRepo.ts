@@ -1,4 +1,4 @@
-import type { Job, JobStatus, JobSummary, Short } from '@shared/history';
+import type { HistoryListQuery, Job, JobStatus, JobSummary, Short } from '@shared/history';
 import type Database from 'better-sqlite3';
 
 const SCHEMA = `
@@ -118,12 +118,6 @@ function rowToShort(r: ShortRow): Short {
   };
 }
 
-export interface HistoryListQuery {
-  search: string;
-  sortBy: 'newest' | 'title' | 'duration';
-  statusFilter: JobStatus[];
-}
-
 export class HistoryRepo {
   /** Exposed for direct introspection in tests; do NOT use from production code. */
   readonly _db: Database.Database;
@@ -223,8 +217,13 @@ export class HistoryRepo {
 
   deleteJob(id: string): void {
     // CASCADE removes shorts; FTS row removed manually (FTS5 has no FK).
-    this._db.prepare('DELETE FROM search_idx WHERE job_id = ?').run(id);
-    this._db.prepare('DELETE FROM jobs WHERE id = ?').run(id);
+    // Wrap both in a transaction so a process crash between them can't leave
+    // a dangling FTS row pointing at a now-deleted job.
+    const tx = this._db.transaction(() => {
+      this._db.prepare('DELETE FROM search_idx WHERE job_id = ?').run(id);
+      this._db.prepare('DELETE FROM jobs WHERE id = ?').run(id);
+    });
+    tx();
   }
 
   /**
