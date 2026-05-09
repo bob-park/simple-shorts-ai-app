@@ -70,9 +70,14 @@ export function RenderCard(props: Props) {
         <div className="gap-md flex flex-col">
           <h3 className="text-card-title text-success-text font-semibold">
             숏츠 {props.result.results.filter((r) => r.status === 'done').length}개 완성
-            {props.result.results.some((r) => r.status !== 'done')
-              ? ` (실패 ${props.result.results.filter((r) => r.status !== 'done').length}개)`
-              : ''}
+            {(() => {
+              const failedCount = props.result.results.filter((r) => r.status === 'failed').length;
+              const canceledCount = props.result.results.filter((r) => r.status === 'canceled').length;
+              const parts: string[] = [];
+              if (failedCount > 0) parts.push(`실패 ${failedCount}개`);
+              if (canceledCount > 0) parts.push(`취소 ${canceledCount}개`);
+              return parts.length > 0 ? ` (${parts.join(', ')})` : '';
+            })()}
           </h3>
           <ol className="gap-sm flex flex-col">
             {props.result.results.map((r: RenderClipResult) => (

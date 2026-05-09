@@ -58,11 +58,16 @@ export function useRender(): UseRender {
   }, []);
 
   const cancel = useCallback(async () => {
-    abortRef.current = true;
+    // Don't set abortRef — RenderService resolves with a partial RenderResult
+    // (some clips done, rest canceled) instead of throwing, so we want the
+    // success path in `start()` to land that result as `'done'` state. The
+    // RenderCard then shows per-clip "⊘ 취소됨" markers next to "✓ 완료".
     await window.api.cancelRender();
   }, []);
 
   const reset = useCallback(() => {
+    // reset DOES set abortRef so the success path's late setState is ignored
+    // — we want to discard the result entirely and return to 'idle'.
     abortRef.current = true;
     void window.api.cancelRender();
     setState({ status: 'idle' });
