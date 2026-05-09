@@ -63,11 +63,13 @@ export class PythonSidecar {
   /**
    * Sends a notification (no id, no response). Used for cancel which we treat
    * as fire-and-forget — the in-flight transcribe request rejects with a
-   * 'canceled' error from the sidecar instead.
+   * 'canceled' error from the sidecar instead. If no sidecar is running there
+   * is nothing to cancel, so this is a no-op rather than triggering a spurious
+   * spawn just to deliver a cancel.
    */
   notify(method: string, params?: Record<string, unknown>): void {
-    const child = this.ensureSpawned();
-    child.stdin.write(JSON.stringify({ method, params: params ?? {} }) + '\n');
+    if (!this.child) return;
+    this.child.stdin.write(JSON.stringify({ method, params: params ?? {} }) + '\n');
   }
 
   shutdown(): void {

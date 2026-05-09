@@ -106,6 +106,20 @@ describe('PythonSidecar', () => {
     void b.catch(() => undefined); // we don't drive a response, just confirm respawn
   });
 
+  it('notify() is a no-op when no sidecar is running (does not spawn)', () => {
+    sidecar.notify('cancel', {});
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('notify() writes to the existing child once spawned', async () => {
+    void sidecar.request<unknown>('health');
+    (child.stdin as PassThrough).read(); // discard the request line
+    sidecar.notify('cancel', { jobId: 'abc' });
+    const sent = (child.stdin as PassThrough).read()?.toString() ?? '';
+    expect(sent.trim()).toBe(JSON.stringify({ method: 'cancel', params: { jobId: 'abc' } }));
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
   it('shutdown() sends EOF and waits for exit', async () => {
     sidecar.request<unknown>('health').catch(() => undefined);
     (child.stdin as PassThrough).read();
