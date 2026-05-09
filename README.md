@@ -13,12 +13,19 @@ This repo uses [mise](https://mise.jdx.dev/) to pin Node 24 + Yarn 4 + Python 3.
 ## Development
 
 ```bash
-yarn install
+yarn install      # postinstall auto-rebuilds better-sqlite3 against Electron's Node ABI
 yarn dev          # launches the Electron app with HMR
 yarn typecheck
-yarn test
+yarn test         # runs vitest under Electron's Node so native modules load
 yarn lint
 ```
+
+> **Native module note:** `better-sqlite3` (added in M9) is a native binding that
+> must be compiled against Electron's embedded Node ABI, not your system Node.
+> The `postinstall` script handles this automatically. If you ever see a
+> `NODE_MODULE_VERSION` mismatch error, run `yarn rebuild:electron` manually.
+> Test runs use `ELECTRON_RUN_AS_NODE=1` so vitest loads the same Electron-ABI
+> binary the app does.
 
 ## Status
 

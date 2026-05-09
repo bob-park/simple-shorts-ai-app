@@ -12,8 +12,10 @@
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron ./node_modules/.bin/vitest run",
+    "test:watch": "ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron ./node_modules/.bin/vitest",
+    "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
+    "postinstall": "electron-rebuild -f -w better-sqlite3"
   },
   "engines": {
     "node": ">=24.0.0"
@@ -34,6 +36,7 @@
   "devDependencies": {
     "@bob-park/eslint-config-bobpark": "0.2.4-RC1-20251111",
     "@bob-park/prettier-config-bobpark": "0.3.1-RC1-20250912",
+    "@electron/rebuild": "^4.0.4",
     "@eslint/eslintrc": "^3.1.0",
     "@tailwindcss/vite": "^4.0.0",
     "@testing-library/dom": "^10.4.1",
