@@ -145,9 +145,18 @@ export class RenderService {
       return null;
     }
     if (track.frames.length === 0) return null;
+    let cmdContent: string;
+    try {
+      cmdContent = buildSendcmd(track, h.start_sec);
+    } catch {
+      // SendcmdGenerator throws when the source is already 9:16 or taller —
+      // M7's sendcmd-driven crop can't handle that geometry. Fall back to the
+      // M6 center-crop args (which also degenerates to a no-op for portrait
+      // sources, but at least doesn't crash the entire render job).
+      return null;
+    }
     const cmdPath = join(opts.outputDir, `short_${clipIndex}.cmd`);
     const trackPath = join(opts.outputDir, `short_${clipIndex}.track.json`);
-    const cmdContent = buildSendcmd(track, h.start_sec);
     await this.fs.writeFile(cmdPath, cmdContent, 'utf8');
     await this.fs.writeFile(trackPath, JSON.stringify(track, null, 2), 'utf8');
     return { cmdPath, trackPath, frameCount: track.frames.length };

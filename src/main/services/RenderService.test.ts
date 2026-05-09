@@ -290,4 +290,33 @@ describe('RenderService with tracker', () => {
     expect(result.results[0]!.tracking).toBeNull();
     expect(result.results[0]!.status).toBe('done');
   });
+
+  it('falls back to center crop when buildSendcmd throws (portrait source)', async () => {
+    const writeFile = vi.fn(async () => undefined);
+    const fs = { writeFile };
+    // Portrait source: 1000×2000 → cropW would be 1125 > sourceWidth, buildSendcmd throws.
+    const tracker = fakeTracker({
+      sourceWidth: 1000,
+      sourceHeight: 2000,
+      frames: [{ t: 0, cx: 500, cy: 1000 }],
+    });
+    const service = new RenderService(runner as never, { tracker: tracker as never, fs: fs as never });
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+
+    const promise = service.render({
+      sourcePath: '/tmp/portrait.mp4',
+      outputDir: '/tmp/out',
+      highlights: [fakeHighlight(1, 0, 30)],
+    });
+    h._resolve();
+    const result = await promise;
+
+    // No track files written — buildSendcmd's throw is caught + degraded to fallback.
+    expect(writeFile).not.toHaveBeenCalled();
+    const args: string[] = run.mock.calls[0]![0].args;
+    expect(args[args.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    expect(result.results[0]!.tracking).toBeNull();
+    expect(result.results[0]!.status).toBe('done');
+  });
 });

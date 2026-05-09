@@ -73,7 +73,7 @@ def _default_reader(path: str) -> _ReaderLike:  # pragma: no cover - integration
                 if not ok:
                     return
                 actual_t = self._cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
-                if actual_t < current_t - interval:
+                if actual_t < current_t:
                     continue  # haven't reached the next sample yet
                 yield (current_t, frame)
                 current_t += interval
