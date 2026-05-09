@@ -445,4 +445,54 @@ describe('RenderService with subtitles', () => {
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toContain("subtitles=filename='/Users/Bob Smith/Movies/short_1.ass'");
   });
+
+  it('retries clip without subtitles filter when ffmpeg lacks libass, then skips for subsequent clips', async () => {
+    const writeFile = vi.fn(async (_path: string, _content: string, _enc?: string) => undefined);
+    const fs = { writeFile };
+    const service = new RenderService(runner as never, { fs: fs as never });
+
+    // Clip 1: first run fails with subtitle filter error → retry succeeds without subtitles.
+    const h1Fail = fakeRunHandle();
+    const h1Retry = fakeRunHandle();
+    // Clip 2: should skip subtitle gen entirely (no filter, no .ass write).
+    const h2 = fakeRunHandle();
+    run.mockReturnValueOnce(h1Fail).mockReturnValueOnce(h1Retry).mockReturnValueOnce(h2);
+
+    const promise = service.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [fakeHighlight(1, 0, 30), fakeHighlight(2, 60, 90)],
+      transcriptWords: fakeWords([
+        { text: 'hi', start: 0, end: 0.5 },
+        { text: 'there', start: 60, end: 60.5 },
+      ]),
+      subtitleOptions: SUBTITLE_OPTS,
+    });
+
+    h1Fail._reject("[AVFilterGraph @ 0x123] No such filter: 'subtitles'");
+    await new Promise((r) => setTimeout(r, 0));
+    h1Retry._resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    h2._resolve();
+    const result = await promise;
+
+    // Three runs total: clip1 attempt + clip1 retry + clip2 (no retry needed)
+    expect(run).toHaveBeenCalledTimes(3);
+    // Clip 1 retry args have NO subtitles filter
+    const retryArgs: string[] = run.mock.calls[1]![0].args;
+    expect(retryArgs[retryArgs.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    // Clip 2 args also have NO subtitles filter (service flag set after first failure)
+    const clip2Args: string[] = run.mock.calls[2]![0].args;
+    expect(clip2Args[clip2Args.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    // Both clips end up done with subtitles: null
+    expect(result.results[0]!.status).toBe('done');
+    expect(result.results[0]!.subtitles).toBeNull();
+    expect(result.results[1]!.status).toBe('done');
+    expect(result.results[1]!.subtitles).toBeNull();
+    // .ass file was written for clip 1 (before failure detected) — that's OK, harmless leftover.
+    // Clip 2 should NOT have written one.
+    const writePaths = writeFile.mock.calls.map((c) => c[0]);
+    expect(writePaths).toContain('/tmp/out/short_1.ass');
+    expect(writePaths).not.toContain('/tmp/out/short_2.ass');
+  });
 });

@@ -56,6 +56,13 @@ export class RenderService {
   private progressHandlers: ProgressHandler[] = [];
   private activeHandle: ReturnType<RunnerLike['run']> | null = null;
   private canceled = false;
+  /**
+   * Set to true the first time ffmpeg fails with "No such filter: 'subtitles'"
+   * — meaning the user's ffmpeg lacks libass. Subsequent clips skip subtitle
+   * generation entirely so we don't pay the failed-render penalty per clip.
+   * Resets on every render() call so a future ffmpeg upgrade is picked up.
+   */
+  private subtitlesUnavailable = false;
   private readonly tracker?: TrackerLike;
   private readonly fs: FsLike;
 
@@ -81,6 +88,7 @@ export class RenderService {
 
   async render(opts: RenderOptions): Promise<RenderResult> {
     this.canceled = false;
+    this.subtitlesUnavailable = false;
     const results: RenderClipResult[] = [];
     const total = opts.highlights.length;
 
@@ -100,7 +108,9 @@ export class RenderService {
           ? buildTrackedArgs(opts.sourcePath, h, outputPath, trackingInfo.cmdPath)
           : buildCenterArgs(opts.sourcePath, h, outputPath);
       const subtitlesInfo =
-        opts.subtitleOptions && opts.transcriptWords ? await this.maybeWriteSubtitles(opts, h, clipIndex) : null;
+        opts.subtitleOptions && opts.transcriptWords && !this.subtitlesUnavailable
+          ? await this.maybeWriteSubtitles(opts, h, clipIndex)
+          : null;
       const args = subtitlesInfo ? appendSubtitleFilter(baseArgs, subtitlesInfo.assPath) : baseArgs;
 
       const handle = this.runner.run({ args, durationSec });
@@ -127,6 +137,36 @@ export class RenderService {
         const message = e instanceof Error ? e.message : String(e);
         if (this.canceled || /canceled/i.test(message)) {
           results.push(this.buildClipResult(clipIndex, h, 'canceled', undefined, 'Render canceled'));
+        } else if (subtitlesInfo && /No such filter: ['"]subtitles['"]/.test(message)) {
+          // ffmpeg lacks libass. Flip the flag so subsequent clips skip
+          // subtitle generation entirely, then retry THIS clip without the
+          // subtitles filter so the user still gets the mp4.
+          this.subtitlesUnavailable = true;
+          this.activeHandle = null;
+          const retryHandle = this.runner.run({ args: baseArgs, durationSec });
+          this.activeHandle = retryHandle;
+          retryHandle.onProgress((fraction) => {
+            for (const cb of this.progressHandlers) {
+              cb({ clipIndex, clipTotal: total, fraction });
+            }
+          });
+          try {
+            await retryHandle.done;
+            results.push(
+              this.buildClipResult(
+                clipIndex,
+                h,
+                'done',
+                outputPath,
+                undefined,
+                trackingInfo ? { frames: trackingInfo.frameCount, trackPath: trackingInfo.trackPath } : null,
+                null,
+              ),
+            );
+          } catch (retryErr: unknown) {
+            const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+            results.push(this.buildClipResult(clipIndex, h, 'failed', undefined, retryMsg));
+          }
         } else {
           results.push(this.buildClipResult(clipIndex, h, 'failed', undefined, message));
         }
