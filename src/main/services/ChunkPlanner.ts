@@ -1,13 +1,13 @@
-import type { Word } from '@shared/transcript';
+import type { Segment } from '@shared/transcript';
 
 export interface ChunkPlannerOptions {
-  /** Above this word count, split into multiple chunks + final rerank. */
+  /** Above this segment count, split into multiple chunks + final rerank. */
   threshold: number;
-  /** Words per chunk when splitting. */
+  /** Segments per chunk when splitting. */
   chunkSize: number;
   /**
-   * Overlap (in words) between adjacent chunks. Helps the LLM not chop a
-   * highlight in half at a chunk boundary.
+   * Overlap (in segments) between adjacent chunks. Helps the LLM not chop a
+   * highlight across a chunk boundary.
    */
   overlap: number;
 }
@@ -19,42 +19,44 @@ export interface ChunkPlan {
 }
 
 export interface ChunkRange {
-  /** 1-based index, useful for progress reporting. */
+  /** 1-based index of this chunk in the plan, useful for progress reporting. */
   index: number;
-  /** Slice of the source words array (start..end exclusive). */
-  words: Word[];
-  /** Convenience: first word's start time (seconds). */
+  /** Slice of the source segments array. */
+  segments: Segment[];
+  /** Global index of segments[0] in the source array — used for index rebasing. */
+  firstIndex: number;
+  /** Convenience: first segment's start time (seconds). */
   startSec: number;
-  /** Convenience: last word's end time (seconds). */
+  /** Convenience: last segment's end time (seconds). */
   endSec: number;
 }
 
 /**
- * Decides how to feed a transcript word list to the LLM.
+ * Decides how to feed a transcript segments list to the LLM.
  *
- * - If `words.length < threshold`, returns one chunk and skips the rerank step.
- * - Otherwise, walks the word array in `chunkSize` windows that step forward
- *   by `chunkSize - overlap` each iteration, so adjacent chunks overlap by
- *   `overlap` words.
+ * - If `segments.length < threshold`, returns one chunk and skips the rerank.
+ * - Otherwise walks the segments array in `chunkSize` windows that step
+ *   forward by `chunkSize - overlap` each iteration.
  *
  * Pure function — no IO, no side effects.
  */
-export function planChunks(words: Word[], opts: ChunkPlannerOptions): ChunkPlan {
+export function planChunks(segments: Segment[], opts: ChunkPlannerOptions): ChunkPlan {
   if (opts.overlap >= opts.chunkSize) {
     throw new Error(
       `ChunkPlanner: overlap must be smaller than chunkSize (got overlap=${opts.overlap}, chunkSize=${opts.chunkSize})`,
     );
   }
-  if (words.length === 0) return { needsRerank: false, chunks: [] };
-  if (words.length < opts.threshold) {
+  if (segments.length === 0) return { needsRerank: false, chunks: [] };
+  if (segments.length < opts.threshold) {
     return {
       needsRerank: false,
       chunks: [
         {
           index: 1,
-          words,
-          startSec: words[0]!.start,
-          endSec: words[words.length - 1]!.end,
+          segments,
+          firstIndex: 0,
+          startSec: segments[0]!.start,
+          endSec: segments[segments.length - 1]!.end,
         },
       ],
     };
@@ -62,12 +64,13 @@ export function planChunks(words: Word[], opts: ChunkPlannerOptions): ChunkPlan 
   const step = opts.chunkSize - opts.overlap;
   const chunks: ChunkRange[] = [];
   let i = 0;
-  while (i < words.length) {
-    const slice = words.slice(i, i + opts.chunkSize);
+  while (i < segments.length) {
+    const slice = segments.slice(i, i + opts.chunkSize);
     if (slice.length === 0) break;
     chunks.push({
       index: chunks.length + 1,
-      words: slice,
+      segments: slice,
+      firstIndex: i,
       startSec: slice[0]!.start,
       endSec: slice[slice.length - 1]!.end,
     });
