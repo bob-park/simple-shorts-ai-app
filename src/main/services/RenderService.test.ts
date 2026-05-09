@@ -199,7 +199,7 @@ describe('RenderService with tracker', () => {
   });
 
   it('uses sendcmd args when tracker returns frames and writes track + cmd files', async () => {
-    const writeFile = vi.fn(async () => undefined);
+    const writeFile = vi.fn(async (_path: string, _content: string, _enc?: string) => undefined);
     const fs = { writeFile };
     const tracker = fakeTracker({
       sourceWidth: 1920,
@@ -239,7 +239,7 @@ describe('RenderService with tracker', () => {
   });
 
   it('falls back to center crop when tracker returns empty frames', async () => {
-    const writeFile = vi.fn(async () => undefined);
+    const writeFile = vi.fn(async (_path: string, _content: string, _enc?: string) => undefined);
     const fs = { writeFile };
     const tracker = fakeTracker({ sourceWidth: 1920, sourceHeight: 1080, frames: [] });
     const service = new RenderService(runner as never, { tracker: tracker as never, fs: fs as never });
@@ -264,7 +264,7 @@ describe('RenderService with tracker', () => {
   });
 
   it('falls back to center crop when tracker.track throws (and clip still succeeds)', async () => {
-    const writeFile = vi.fn(async () => undefined);
+    const writeFile = vi.fn(async (_path: string, _content: string, _enc?: string) => undefined);
     const fs = { writeFile };
     const tracker = {
       track: vi.fn(async () => {
@@ -292,7 +292,7 @@ describe('RenderService with tracker', () => {
   });
 
   it('falls back to center crop when buildSendcmd throws (portrait source)', async () => {
-    const writeFile = vi.fn(async () => undefined);
+    const writeFile = vi.fn(async (_path: string, _content: string, _enc?: string) => undefined);
     const fs = { writeFile };
     // Portrait source: 1000×2000 → cropW would be 1125 > sourceWidth, buildSendcmd throws.
     const tracker = fakeTracker({
@@ -343,7 +343,7 @@ describe('RenderService with subtitles', () => {
   });
 
   it('writes .ass file and appends subtitles= to filter chain when options provided + words in window', async () => {
-    const writeFile = vi.fn(async () => undefined);
+    const writeFile = vi.fn(async (_path: string, _content: string, _enc?: string) => undefined);
     const fs = { writeFile };
     const service = new RenderService(runner as never, { fs: fs as never });
     const h = fakeRunHandle();
@@ -379,7 +379,7 @@ describe('RenderService with subtitles', () => {
   });
 
   it('skips ass writing + filter when subtitleOptions is undefined', async () => {
-    const writeFile = vi.fn(async () => undefined);
+    const writeFile = vi.fn(async (_path: string, _content: string, _enc?: string) => undefined);
     const fs = { writeFile };
     const service = new RenderService(runner as never, { fs: fs as never });
     const h = fakeRunHandle();
@@ -402,7 +402,7 @@ describe('RenderService with subtitles', () => {
   });
 
   it('skips ass writing when no transcript words fall inside the clip window', async () => {
-    const writeFile = vi.fn(async () => undefined);
+    const writeFile = vi.fn(async (_path: string, _content: string, _enc?: string) => undefined);
     const fs = { writeFile };
     const service = new RenderService(runner as never, { fs: fs as never });
     const h = fakeRunHandle();
