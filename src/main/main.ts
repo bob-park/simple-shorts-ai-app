@@ -1,3 +1,4 @@
+import { HighlightSetSchema } from '@shared/highlight';
 import type { Settings } from '@shared/settings';
 import { TranscriptSchema } from '@shared/transcript';
 import { sanitizeFilename } from '@shared/youtube';
@@ -5,15 +6,17 @@ import { BrowserWindow, app, dialog, ipcMain, safeStorage, session, shell } from
 import Store from 'electron-store';
 import { spawn } from 'node:child_process';
 import { promises as fsPromises } from 'node:fs';
-import { join, resolve as resolvePath } from 'node:path';
+import { basename, extname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import youtubeDl from 'youtube-dl-exec';
 
+import { FfmpegRunner } from './infra/FfmpegRunner';
 import { OpenRouterClient } from './infra/OpenRouterClient';
 import { PythonSidecar } from './infra/PythonSidecar';
 import { SecureStorage } from './infra/SecureStorage';
 import { SettingsStore } from './infra/SettingsStore';
 import { HighlightService } from './services/HighlightService';
+import { RenderService } from './services/RenderService';
 import { TranscribeService } from './services/TranscribeService';
 import { type DownloadHandle, YouTubeService } from './services/YouTubeService';
 
@@ -33,6 +36,11 @@ let openRouterClient: OpenRouterClient | null = null;
 let highlightService: HighlightService | null = null;
 let extractProgressUnsub: (() => void) | null = null;
 let extractInFlight = false;
+
+let ffmpegRunner: FfmpegRunner | null = null;
+let renderService: RenderService | null = null;
+let renderProgressUnsub: (() => void) | null = null;
+let renderInFlight = false;
 
 function setupContentSecurityPolicy(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -124,6 +132,19 @@ function getHighlightService(): HighlightService {
     }
   });
   return highlightService;
+}
+
+function getRenderService(): RenderService {
+  if (renderService) return renderService;
+  ffmpegRunner = new FfmpegRunner({ spawn });
+  renderService = new RenderService(ffmpegRunner);
+  renderProgressUnsub = renderService.onProgress((p) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('render:progress', p);
+    }
+  });
+  return renderService;
 }
 
 void app.whenReady().then(() => {
@@ -275,6 +296,45 @@ void app.whenReady().then(() => {
     highlightService?.cancel();
   });
 
+  ipcMain.handle('render:run', async (_e, audioPath: string) => {
+    if (renderInFlight) {
+      throw new Error('A render is already in progress');
+    }
+    renderInFlight = true;
+    try {
+      const highlightsPath = `${audioPath}.highlights.json`;
+      let raw: string;
+      try {
+        raw = await fsPromises.readFile(highlightsPath, 'utf8');
+      } catch (e: unknown) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') {
+          throw new Error(`No highlights found at ${highlightsPath}`);
+        }
+        throw e;
+      }
+      const highlightSet = HighlightSetSchema.parse(JSON.parse(raw));
+
+      const settings = settingsStore.get();
+      const sourceStem = basename(audioPath, extname(audioPath));
+      const outputDir = join(settings.paths.outputs, sourceStem);
+      await fsPromises.mkdir(outputDir, { recursive: true });
+
+      const service = getRenderService();
+      return await service.render({
+        sourcePath: audioPath,
+        outputDir,
+        highlights: highlightSet.highlights,
+      });
+    } finally {
+      renderInFlight = false;
+    }
+  });
+
+  ipcMain.handle('render:cancel', () => {
+    renderService?.cancel();
+  });
+
   createMainWindow();
 
   app.on('activate', () => {
@@ -293,5 +353,10 @@ app.on('window-all-closed', () => {
   highlightService?.cancel();
   highlightService = null;
   openRouterClient = null;
+  renderProgressUnsub?.();
+  renderProgressUnsub = null;
+  renderService?.cancel();
+  renderService = null;
+  ffmpegRunner = null;
   if (process.platform !== 'darwin') app.quit();
 });
