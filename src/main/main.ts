@@ -28,6 +28,12 @@ import { type DownloadHandle, YouTubeService } from './services/YouTubeService';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const isDev = !app.isPackaged;
 
+// Local LLM model identity — single source of truth for both extract:run's
+// on-demand download and Settings re-download.
+const LLM_MODEL_DIR = 'models';
+const LLM_MODEL_FILENAME = 'gemma-3-4b-it-Q4_K_M.gguf';
+const LLM_MODEL_REPO = 'unsloth/gemma-3-4b-it-GGUF';
+
 let settingsStore: SettingsStore;
 let youtubeService: YouTubeService;
 let activeDownload: DownloadHandle | null = null;
@@ -139,7 +145,7 @@ function getHighlightService(): HighlightService {
   if (!pythonSidecar) {
     throw new Error('PythonSidecar failed to initialise');
   }
-  const modelPath = join(app.getPath('userData'), 'models', 'gemma-3-4b-it-Q4_K_M.gguf');
+  const modelPath = join(app.getPath('userData'), LLM_MODEL_DIR, LLM_MODEL_FILENAME);
   sidecarLlmClient = new SidecarLlmClient(pythonSidecar, modelPath);
   highlightService = new HighlightService(sidecarLlmClient);
   extractProgressUnsub = highlightService.onProgress((p) => {
@@ -326,23 +332,20 @@ void app.whenReady().then(() => {
       // Download model on demand if not yet present.
       const status = await sidecarLlmClient!.modelStatus();
       if (!status.exists) {
-        await fsPromises.mkdir(join(app.getPath('userData'), 'models'), { recursive: true });
-        await sidecarLlmClient!.downloadModel(
-          { repo: 'unsloth/gemma-3-4b-it-GGUF', filename: 'gemma-3-4b-it-Q4_K_M.gguf' },
-          (p) => {
-            const win = BrowserWindow.getAllWindows()[0];
-            if (win && !win.isDestroyed()) {
-              win.webContents.send('extract:progress', {
-                jobId: audioPath,
-                chunkIndex: 0,
-                chunkTotal: 0,
-                phase: 'download' as const,
-                downloadedBytes: p.processed,
-                totalBytes: p.total,
-              });
-            }
-          },
-        );
+        await fsPromises.mkdir(join(app.getPath('userData'), LLM_MODEL_DIR), { recursive: true });
+        await sidecarLlmClient!.downloadModel({ repo: LLM_MODEL_REPO, filename: LLM_MODEL_FILENAME }, (p) => {
+          const win = BrowserWindow.getAllWindows()[0];
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('extract:progress', {
+              jobId: audioPath,
+              chunkIndex: 0,
+              chunkTotal: 0,
+              phase: 'download' as const,
+              downloadedBytes: p.processed,
+              totalBytes: p.total,
+            });
+          }
+        });
       }
 
       const settings = settingsStore.get();
@@ -369,18 +372,15 @@ void app.whenReady().then(() => {
   ipcMain.handle('llm:downloadModel', async () => {
     getHighlightService(); // ensures sidecarLlmClient is initialized
     if (!sidecarLlmClient) throw new Error('SidecarLlmClient not initialized');
-    const modelPath = join(app.getPath('userData'), 'models', 'gemma-3-4b-it-Q4_K_M.gguf');
+    const modelPath = join(app.getPath('userData'), LLM_MODEL_DIR, LLM_MODEL_FILENAME);
     await fsPromises.unlink(modelPath).catch(() => undefined);
-    await fsPromises.mkdir(join(app.getPath('userData'), 'models'), { recursive: true });
-    await sidecarLlmClient.downloadModel(
-      { repo: 'unsloth/gemma-3-4b-it-GGUF', filename: 'gemma-3-4b-it-Q4_K_M.gguf' },
-      (p) => {
-        const win = BrowserWindow.getAllWindows()[0];
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('llm:downloadProgress', { processed: p.processed, total: p.total });
-        }
-      },
-    );
+    await fsPromises.mkdir(join(app.getPath('userData'), LLM_MODEL_DIR), { recursive: true });
+    await sidecarLlmClient.downloadModel({ repo: LLM_MODEL_REPO, filename: LLM_MODEL_FILENAME }, (p) => {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('llm:downloadProgress', { processed: p.processed, total: p.total });
+      }
+    });
   });
 
   ipcMain.handle('llm:modelStatus', async () => {

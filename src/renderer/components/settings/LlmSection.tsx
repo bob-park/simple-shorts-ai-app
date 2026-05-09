@@ -14,6 +14,7 @@ export function LlmSection() {
   const [status, setStatus] = useState<ModelStatus | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<{ processed: number; total: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function refresh(): Promise<void> {
     const s = await window.api.llmModelStatus();
@@ -27,11 +28,15 @@ export function LlmSection() {
   }, []);
 
   async function handleRedownload(): Promise<void> {
+    setError(null);
     setDownloading(true);
     setDownloadProgress({ processed: 0, total: 0 });
     try {
       await window.api.llmDownloadModel();
       await refresh();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
     } finally {
       setDownloading(false);
       setDownloadProgress(null);
@@ -69,6 +74,7 @@ export function LlmSection() {
             </div>
           </div>
         ) : null}
+        {error ? <p className="text-body-sm text-brand-coral break-words">다운로드 실패: {error}</p> : null}
         <div className="gap-sm flex">
           <button
             type="button"
