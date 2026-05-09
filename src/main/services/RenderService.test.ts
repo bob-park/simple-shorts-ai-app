@@ -178,3 +178,116 @@ describe('RenderService', () => {
     expect(result.results).toHaveLength(0);
   });
 });
+
+function fakeTracker(result: {
+  sourceWidth: number;
+  sourceHeight: number;
+  frames: { t: number; cx: number; cy: number }[];
+}) {
+  return {
+    track: vi.fn(async () => result),
+  };
+}
+
+describe('RenderService with tracker', () => {
+  let run: ReturnType<typeof vi.fn>;
+  let runner: { run: typeof run };
+
+  beforeEach(() => {
+    run = vi.fn();
+    runner = { run };
+  });
+
+  it('uses sendcmd args when tracker returns frames and writes track + cmd files', async () => {
+    const writeFile = vi.fn(async () => undefined);
+    const fs = { writeFile };
+    const tracker = fakeTracker({
+      sourceWidth: 1920,
+      sourceHeight: 1080,
+      frames: [
+        { t: 0, cx: 960, cy: 540 },
+        { t: 0.5, cx: 970, cy: 545 },
+      ],
+    });
+    const service = new RenderService(runner as never, { tracker: tracker as never, fs: fs as never });
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+
+    const promise = service.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [fakeHighlight(1, 0, 30)],
+    });
+    h._resolve();
+    const result = await promise;
+
+    // Two files written: short_1.cmd and short_1.track.json
+    expect(writeFile).toHaveBeenCalledTimes(2);
+    const writePaths = writeFile.mock.calls.map((c: unknown[]) => c[0]);
+    expect(writePaths).toContain('/tmp/out/short_1.cmd');
+    expect(writePaths).toContain('/tmp/out/short_1.track.json');
+
+    // ffmpeg args use sendcmd + named crop
+    const args: string[] = run.mock.calls[0]![0].args;
+    const vfIndex = args.indexOf('-vf');
+    expect(vfIndex).toBeGreaterThan(-1);
+    expect(args[vfIndex + 1]).toMatch(/sendcmd=f=\/tmp\/out\/short_1\.cmd,crop@c=ih\*9\/16:ih:0:0,scale=1080:1920/);
+
+    // RenderClipResult.tracking populated
+    expect(result.results[0]!.tracking).toEqual({ frames: 2, trackPath: '/tmp/out/short_1.track.json' });
+    expect(result.results[0]!.status).toBe('done');
+  });
+
+  it('falls back to center crop when tracker returns empty frames', async () => {
+    const writeFile = vi.fn(async () => undefined);
+    const fs = { writeFile };
+    const tracker = fakeTracker({ sourceWidth: 1920, sourceHeight: 1080, frames: [] });
+    const service = new RenderService(runner as never, { tracker: tracker as never, fs: fs as never });
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+
+    const promise = service.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [fakeHighlight(1, 0, 30)],
+    });
+    h._resolve();
+    const result = await promise;
+
+    // No track files written
+    expect(writeFile).not.toHaveBeenCalled();
+    // Args use the M6 static center crop
+    const args: string[] = run.mock.calls[0]![0].args;
+    expect(args[args.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    expect(result.results[0]!.tracking).toBeNull();
+    expect(result.results[0]!.status).toBe('done');
+  });
+
+  it('falls back to center crop when tracker.track throws (and clip still succeeds)', async () => {
+    const writeFile = vi.fn(async () => undefined);
+    const fs = { writeFile };
+    const tracker = {
+      track: vi.fn(async () => {
+        throw new Error('tracker explosion');
+      }),
+    };
+    const service = new RenderService(runner as never, { tracker: tracker as never, fs: fs as never });
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+
+    const promise = service.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [fakeHighlight(1, 0, 30)],
+    });
+    h._resolve();
+    const result = await promise;
+
+    // Same fallback path as empty frames
+    expect(writeFile).not.toHaveBeenCalled();
+    const args: string[] = run.mock.calls[0]![0].args;
+    expect(args[args.indexOf('-vf') + 1]).toBe('crop=ih*9/16:ih,scale=1080:1920');
+    expect(result.results[0]!.tracking).toBeNull();
+    expect(result.results[0]!.status).toBe('done');
+  });
+});
