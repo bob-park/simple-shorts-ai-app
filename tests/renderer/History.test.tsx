@@ -87,8 +87,6 @@ describe('HistoryPage', () => {
     await waitFor(() => expect(calls.historyList).toHaveBeenCalled());
     const search = screen.getByPlaceholderText(/제목, 채널/);
     await user.type(search, 'AI');
-    await waitFor(() =>
-      expect(calls.historyList).toHaveBeenCalledWith(expect.objectContaining({ search: 'AI' })),
-    );
+    await waitFor(() => expect(calls.historyList).toHaveBeenCalledWith(expect.objectContaining({ search: 'AI' })));
   });
 });
