@@ -1,10 +1,12 @@
 import { DownloadProgress } from '@renderer/components/newjob/DownloadProgress';
 import { HighlightCard } from '@renderer/components/newjob/HighlightCard';
 import { PreviewCard } from '@renderer/components/newjob/PreviewCard';
+import { RenderCard } from '@renderer/components/newjob/RenderCard';
 import { TranscribeCard } from '@renderer/components/newjob/TranscribeCard';
 import { UrlInput } from '@renderer/components/newjob/UrlInput';
 import { useDownload } from '@renderer/hooks/useDownload';
 import { useHighlights } from '@renderer/hooks/useHighlights';
+import { useRender } from '@renderer/hooks/useRender';
 import { useTranscribe } from '@renderer/hooks/useTranscribe';
 import { useVideoPreview } from '@renderer/hooks/useVideoPreview';
 import { useNavigate } from 'react-router-dom';
@@ -15,6 +17,7 @@ export function NewJobPage() {
   const transcribe = useTranscribe();
   const highlights = useHighlights();
   const navigate = useNavigate();
+  const renderShort = useRender();
 
   const downloadInFlight = download.status === 'starting' || download.status === 'downloading';
 
@@ -122,15 +125,59 @@ export function NewJobPage() {
                 />
               ) : null}
               {highlights.state.status === 'done' ? (
-                <HighlightCard
-                  status="done"
-                  highlightsPath={highlights.state.highlightsPath}
-                  highlightSet={highlights.state.highlightSet}
-                  onOpenJson={() => {
-                    if (highlights.state.status === 'done') void window.api.openPath(highlights.state.highlightsPath);
-                  }}
-                  onReset={() => highlights.reset()}
-                />
+                <>
+                  <HighlightCard
+                    status="done"
+                    highlightsPath={highlights.state.highlightsPath}
+                    highlightSet={highlights.state.highlightSet}
+                    onOpenJson={() => {
+                      if (highlights.state.status === 'done') void window.api.openPath(highlights.state.highlightsPath);
+                    }}
+                    onReset={() => {
+                      highlights.reset();
+                      renderShort.reset();
+                    }}
+                  />
+                  {renderShort.state.status === 'idle' ? (
+                    <RenderCard
+                      status="idle"
+                      onStart={() => {
+                        if (transcribe.state.status === 'done') void renderShort.start(transcribe.state.audioPath);
+                      }}
+                    />
+                  ) : null}
+                  {renderShort.state.status === 'rendering' ? (
+                    <RenderCard
+                      status="rendering"
+                      progress={renderShort.state.progress}
+                      onCancel={() => void renderShort.cancel()}
+                    />
+                  ) : null}
+                  {renderShort.state.status === 'done' ? (
+                    <RenderCard
+                      status="done"
+                      result={renderShort.state.result}
+                      onRevealDir={() => {
+                        if (renderShort.state.status === 'done')
+                          void window.api.revealInFolder(renderShort.state.result.outputDir);
+                      }}
+                      onReset={() => renderShort.reset()}
+                    />
+                  ) : null}
+                  {renderShort.state.status === 'canceled' ? (
+                    <RenderCard status="canceled" onReset={() => renderShort.reset()} />
+                  ) : null}
+                  {renderShort.state.status === 'missing-prereq' ? (
+                    <RenderCard
+                      status="missing-prereq"
+                      error={renderShort.state.error}
+                      onReset={() => renderShort.reset()}
+                    />
+                  ) : null}
+                  {renderShort.state.status === 'error' ? (
+                    <RenderCard status="error" error={renderShort.state.error} onReset={() => renderShort.reset()} />
+                  ) : null}
+                </>
               ) : null}
               {highlights.state.status === 'canceled' ? (
                 <HighlightCard status="canceled" onReset={() => highlights.reset()} />

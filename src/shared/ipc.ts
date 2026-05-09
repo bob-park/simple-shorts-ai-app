@@ -1,5 +1,6 @@
 import type { ExtractProgress } from './extract';
 import type { HighlightSet } from './highlight';
+import type { RenderProgress, RenderResult } from './render';
 import type { Settings } from './settings';
 import type { TranscribeProgress } from './transcribe';
 import type { Transcript } from './transcript';
@@ -43,6 +44,22 @@ export interface AppApi {
   cancelExtract(): Promise<void>;
   /** Subscribe to extract progress notifications. Returns unsubscribe. */
   onExtractProgress(callback: (p: ExtractProgress) => void): () => void;
+
+  /**
+   * Render every highlight in the sibling `<audioPath>.highlights.json` into
+   * `<settings.paths.outputs>/<sourceStem>/short_<i>.mp4`. Sequential — one
+   * ffmpeg child at a time. Returns the per-clip result list (some clips may
+   * have status 'failed' even if the overall call resolves).
+   *
+   * Throws `Error('No highlights found at <path>')` if the highlights.json
+   * does not exist. Throws `Error('ffmpeg is not on PATH')` if the ffmpeg
+   * binary cannot be spawned (caught at first attempt).
+   */
+  renderShorts(audioPath: string): Promise<RenderResult>;
+  /** Cancel the active render job (kills current ffmpeg + drops the queue). */
+  cancelRender(): Promise<void>;
+  /** Subscribe to per-clip progress notifications. Returns unsubscribe. */
+  onRenderProgress(callback: (p: RenderProgress) => void): () => void;
 
   revealInFolder(absolutePath: string): Promise<void>;
   /** Open a file with the OS default app (e.g., transcript.json → text editor). */
