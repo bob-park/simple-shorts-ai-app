@@ -4,12 +4,14 @@ import { BrowserWindow, app, dialog, ipcMain, safeStorage, session, shell } from
 import Store from 'electron-store';
 import { spawn } from 'node:child_process';
 import { promises as fsPromises } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import youtubeDl from 'youtube-dl-exec';
 
+import { PythonSidecar } from './infra/PythonSidecar';
 import { SecureStorage } from './infra/SecureStorage';
 import { SettingsStore } from './infra/SettingsStore';
+import { TranscribeService } from './services/TranscribeService';
 import { type DownloadHandle, YouTubeService } from './services/YouTubeService';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -20,6 +22,9 @@ let secureStorage: SecureStorage;
 let youtubeService: YouTubeService;
 let activeDownload: DownloadHandle | null = null;
 let downloadStarting = false;
+let pythonSidecar: PythonSidecar | null = null;
+let transcribeService: TranscribeService | null = null;
+let transcribeProgressUnsub: (() => void) | null = null;
 
 function setupContentSecurityPolicy(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -75,6 +80,29 @@ function createMainWindow(): BrowserWindow {
   }
 
   return win;
+}
+
+function getTranscribeService(): TranscribeService {
+  if (transcribeService) return transcribeService;
+  const repoRoot = resolvePath(__dirname, '../../');
+  const modelsDir = join(app.getPath('userData'), 'whisper-models');
+  pythonSidecar = new PythonSidecar({
+    spawn,
+    command: 'uv',
+    args: ['run', 'python', '-m', 'shorts_sidecar'],
+    cwd: join(repoRoot, 'sidecar'),
+    env: { HF_HOME: modelsDir },
+  });
+  transcribeService = new TranscribeService(pythonSidecar);
+
+  transcribeProgressUnsub = pythonSidecar.onProgress((p) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('transcribe:progress', p);
+    }
+  });
+
+  return transcribeService;
 }
 
 void app.whenReady().then(() => {
@@ -160,6 +188,31 @@ void app.whenReady().then(() => {
     shell.showItemInFolder(absolutePath);
   });
 
+  ipcMain.handle('transcribe:run', async (_e, audioPath: string) => {
+    const service = getTranscribeService();
+    const settings = settingsStore.get();
+    const transcript = await service.transcribe(audioPath, {
+      model: settings.whisper.model,
+      language: settings.whisper.language,
+    });
+    const transcriptPath = `${audioPath}.transcript.json`;
+    await fsPromises.writeFile(transcriptPath, JSON.stringify(transcript, null, 2), 'utf8');
+    return { transcriptPath, transcript };
+  });
+
+  ipcMain.handle('transcribe:cancel', async () => {
+    if (transcribeService) await transcribeService.cancel();
+  });
+
+  ipcMain.handle('sidecar:health', async () => {
+    const service = getTranscribeService();
+    return service.health();
+  });
+
+  ipcMain.handle('shell:openPath', async (_e, absolutePath: string) => {
+    await shell.openPath(absolutePath);
+  });
+
   createMainWindow();
 
   app.on('activate', () => {
@@ -168,5 +221,10 @@ void app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  transcribeProgressUnsub?.();
+  transcribeProgressUnsub = null;
+  pythonSidecar?.shutdown();
+  pythonSidecar = null;
+  transcribeService = null;
   if (process.platform !== 'darwin') app.quit();
 });
