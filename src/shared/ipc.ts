@@ -1,5 +1,6 @@
 import type { ExtractProgress } from './extract';
 import type { HighlightSet } from './highlight';
+import type { HistoryListQuery, JobDetail, JobSummary } from './history';
 import type { RenderProgress, RenderResult } from './render';
 import type { Settings } from './settings';
 import type { TranscribeProgress } from './transcribe';
@@ -60,6 +61,13 @@ export interface AppApi {
   cancelRender(): Promise<void>;
   /** Subscribe to per-clip progress notifications. Returns unsubscribe. */
   onRenderProgress(callback: (p: RenderProgress) => void): () => void;
+
+  /** Fetch the history list with optional search/sort/filter. */
+  historyList(query: HistoryListQuery): Promise<JobSummary[]>;
+  /** Fetch full job + shorts detail for the inline drawer. */
+  historyGetDetail(jobId: string): Promise<JobDetail | null>;
+  /** Permanently delete a job + its shorts + thumbnails. */
+  historyDelete(jobId: string): Promise<void>;
 
   revealInFolder(absolutePath: string): Promise<void>;
   /** Open a file with the OS default app (e.g., transcript.json → text editor). */
