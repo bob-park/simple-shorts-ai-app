@@ -175,6 +175,42 @@ describe('HighlightService (segment-based)', () => {
     ]);
   });
 
+  it('throws a step-tagged error when chunk LLM response is missing the highlights key', async () => {
+    chatJson.mockResolvedValueOnce({ candidates: [] });
+    await expect(
+      service.extract({
+        transcript: makeTranscript(50),
+        audioPath: '/x.mp4',
+        apiKey: 'k',
+        model: 'm',
+        count: 1,
+        minSec: 5,
+        maxSec: 60,
+      }),
+    ).rejects.toThrow(/invalid response shape on chunk 1\/1/i);
+  });
+
+  it('throws a step-tagged error when rerank LLM response is missing the highlights key', async () => {
+    // 200 segments → 3 chunks → rerank.
+    chatJson
+      .mockResolvedValueOnce({ highlights: [{ segment_indices: [0, 1], title: 'C0', hook: 'h' }] })
+      .mockResolvedValueOnce({ highlights: [{ segment_indices: [0, 1], title: 'C1', hook: 'h' }] })
+      .mockResolvedValueOnce({ highlights: [{ segment_indices: [0, 1], title: 'C2', hook: 'h' }] })
+      // rerank: model echoes input shape with `candidates` instead of `highlights`
+      .mockResolvedValueOnce({ candidates: [{ segment_indices: [0, 1], title: 'X', hook: 'h' }] });
+    await expect(
+      service.extract({
+        transcript: makeTranscript(200),
+        audioPath: '/x.mp4',
+        apiKey: 'k',
+        model: 'm',
+        count: 1,
+        minSec: 5,
+        maxSec: 60,
+      }),
+    ).rejects.toThrow(/invalid response shape on rerank step/i);
+  });
+
   it('throws MissingApiKeyError when apiKey is empty', async () => {
     await expect(
       service.extract({

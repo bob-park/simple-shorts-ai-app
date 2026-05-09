@@ -40,7 +40,7 @@ const SYSTEM_PROMPT = (count: number, minSec: number, maxSec: number) =>
   `당신은 짧은 영상 편집자다. 아래 세그먼트(문장 단위) 트랜스크립트를 분석해서 시청자를 끌어당길 ${count}개의 하이라이트를 골라라. 각 하이라이트는 한 개 이상의 세그먼트로 구성되며 비연속(non-contiguous)일 수 있다. 모든 세그먼트의 길이 합은 ${minSec}초 ~ ${maxSec}초 사이여야 한다. 응답은 다음 JSON 스키마를 정확히 따른다: {"highlights":[{"segment_indices":number[],"title":string,"hook":string}]}. segment_indices는 아래 트랜스크립트의 [n] 번호다. 다른 어떤 텍스트도 포함하지 말고 JSON만 반환하라.`;
 
 const RERANK_PROMPT = (count: number, minSec: number, maxSec: number) =>
-  `당신은 짧은 영상 편집자다. 아래는 같은 영상의 여러 구간에서 뽑힌 하이라이트 후보들이다. segment_indices는 영상 전체에서의 글로벌 인덱스다. 시청자를 가장 끌어당길 ${count}개를 최종 선택하라. 모든 세그먼트의 길이 합은 ${minSec}초 ~ ${maxSec}초 사이여야 한다. 동일한 JSON 스키마를 따른다.`;
+  `당신은 짧은 영상 편집자다. 아래는 같은 영상의 여러 구간에서 뽑힌 하이라이트 후보들이다. segment_indices는 영상 전체에서의 글로벌 인덱스다. 시청자를 가장 끌어당길 ${count}개를 최종 선택하라. 모든 세그먼트의 길이 합은 ${minSec}초 ~ ${maxSec}초 사이여야 한다. 응답은 다음 JSON 스키마를 정확히 따른다: {"highlights":[{"segment_indices":number[],"title":string,"hook":string}]}. 다른 어떤 텍스트도 포함하지 말고 JSON만 반환하라.`;
 
 /**
  * Orchestrates LLM-based highlight extraction over Whisper segments.
@@ -106,8 +106,14 @@ export class HighlightService {
           userPrompt,
           signal,
         });
-        const parsed = RawResponseSchema.parse(raw);
-        for (const h of parsed.highlights) {
+        const parsed = RawResponseSchema.safeParse(raw);
+        if (!parsed.success) {
+          throw new Error(
+            `LLM returned invalid response shape on chunk ${chunk.index}/${plan.chunks.length} ` +
+              `(expected {"highlights":[…]}). Raw response: ${JSON.stringify(raw).slice(0, 400)}`,
+          );
+        }
+        for (const h of parsed.data.highlights) {
           candidatesGlobal.push({
             segment_indices: h.segment_indices.map((i) => chunk.firstIndex + i),
             title: h.title,
@@ -125,7 +131,7 @@ export class HighlightService {
           phase: 'rerank',
         });
         const sysRerank = RERANK_PROMPT(opts.count, opts.minSec, opts.maxSec);
-        const userPrompt = `다음은 글로벌 segment_indices 후보 목록이다 (JSON):\n${JSON.stringify({ candidates: candidatesGlobal }, null, 2)}`;
+        const userPrompt = `다음은 글로벌 segment_indices 후보 목록이다 (JSON):\n${JSON.stringify({ highlights: candidatesGlobal }, null, 2)}`;
         const raw = await this.client.chatJson({
           apiKey: opts.apiKey,
           model: opts.model,
@@ -134,7 +140,14 @@ export class HighlightService {
           temperature: 0.2,
           signal,
         });
-        finalCandidates = RawResponseSchema.parse(raw).highlights.map((h) => ({
+        const parsed = RawResponseSchema.safeParse(raw);
+        if (!parsed.success) {
+          throw new Error(
+            `LLM returned invalid response shape on rerank step ` +
+              `(expected {"highlights":[…]}). Raw response: ${JSON.stringify(raw).slice(0, 400)}`,
+          );
+        }
+        finalCandidates = parsed.data.highlights.map((h) => ({
           segment_indices: h.segment_indices,
           title: h.title,
           hook: h.hook,
