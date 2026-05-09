@@ -4,7 +4,7 @@ import type { Settings } from '@shared/settings';
 import { TranscriptSchema, type Word } from '@shared/transcript';
 import { VideoMetaSchema, sanitizeFilename } from '@shared/youtube';
 import Database from 'better-sqlite3';
-import { BrowserWindow, app, dialog, ipcMain, safeStorage, session, shell } from 'electron';
+import { BrowserWindow, app, dialog, ipcMain, session, shell } from 'electron';
 import Store from 'electron-store';
 import { spawn } from 'node:child_process';
 import { promises as fsPromises } from 'node:fs';
@@ -15,7 +15,6 @@ import youtubeDl from 'youtube-dl-exec';
 import { FfmpegRunner } from './infra/FfmpegRunner';
 import { HistoryRepo } from './infra/HistoryRepo';
 import { PythonSidecar } from './infra/PythonSidecar';
-import { SecureStorage } from './infra/SecureStorage';
 import { SettingsStore } from './infra/SettingsStore';
 import { SidecarLlmClient } from './infra/SidecarLlmClient';
 import { HighlightService } from './services/HighlightService';
@@ -30,7 +29,6 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const isDev = !app.isPackaged;
 
 let settingsStore: SettingsStore;
-let secureStorage: SecureStorage;
 let youtubeService: YouTubeService;
 let activeDownload: DownloadHandle | null = null;
 let downloadStarting = false;
@@ -206,8 +204,6 @@ void app.whenReady().then(() => {
     downloads: app.getPath('downloads'),
     documents: app.getPath('documents'),
   });
-  secureStorage = new SecureStorage(join(app.getPath('userData'), 'secrets.bin'), safeStorage, fsPromises);
-
   youtubeService = new YouTubeService({
     youtubeDl: youtubeDl as never,
     spawn: spawn as never,
@@ -223,10 +219,6 @@ void app.whenReady().then(() => {
   ipcMain.handle('settings:get', () => settingsStore.get());
   ipcMain.handle('settings:update', (_e, patch: Partial<Settings>) => settingsStore.update(patch));
   ipcMain.handle('settings:reset', () => settingsStore.reset());
-
-  ipcMain.handle('secure:hasKey', () => secureStorage.hasKey());
-  ipcMain.handle('secure:setKey', (_e, key: string) => secureStorage.setKey(key));
-  ipcMain.handle('secure:clearKey', () => secureStorage.clearKey());
 
   ipcMain.handle('dialog:pickFolder', async (_e, opts: { title?: string; defaultPath?: string }) => {
     const result = await dialog.showOpenDialog({
