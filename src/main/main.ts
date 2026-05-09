@@ -1,6 +1,6 @@
 import { HighlightSetSchema } from '@shared/highlight';
 import type { Settings } from '@shared/settings';
-import { TranscriptSchema } from '@shared/transcript';
+import { TranscriptSchema, type Word } from '@shared/transcript';
 import { sanitizeFilename } from '@shared/youtube';
 import { BrowserWindow, app, dialog, ipcMain, safeStorage, session, shell } from 'electron';
 import Store from 'electron-store';
@@ -332,11 +332,37 @@ void app.whenReady().then(() => {
       const outputDir = join(settings.paths.outputs, sourceStem);
       await fsPromises.mkdir(outputDir, { recursive: true });
 
+      // Subtitles are sourced from the sibling transcript.json. If subtitles are
+      // disabled in settings OR the transcript file is missing, we render without
+      // subtitles (the M7 behaviour). Read errors are non-fatal — render proceeds.
+      let transcriptWords: Word[] | undefined;
+      if (settings.subtitles.enabled) {
+        try {
+          const transcriptRaw = await fsPromises.readFile(`${audioPath}.transcript.json`, 'utf8');
+          const transcript = TranscriptSchema.parse(JSON.parse(transcriptRaw));
+          transcriptWords = transcript.words;
+        } catch {
+          // No transcript or unreadable — silently render without subtitles.
+          transcriptWords = undefined;
+        }
+      }
+
       const service = getRenderService();
       return await service.render({
         sourcePath: audioPath,
         outputDir,
         highlights: highlightSet.highlights,
+        transcriptWords,
+        subtitleOptions:
+          settings.subtitles.enabled && transcriptWords
+            ? {
+                fontFamily: settings.subtitles.fontFamily,
+                fontSize: settings.subtitles.fontSize,
+                fillColor: settings.subtitles.fillColor,
+                outlineColor: settings.subtitles.outlineColor,
+                position: settings.subtitles.position,
+              }
+            : undefined,
       });
     } finally {
       renderInFlight = false;

@@ -30,6 +30,18 @@ export const RenderClipResultSchema = z.object({
       trackPath: z.string().min(1),
     })
     .nullish(),
+  /**
+   * If subtitles were enabled and at least one cue landed in the clip window:
+   * the cue count and the persisted .ass file path. Absent when subtitles
+   * were disabled in settings OR no transcript words fell inside the clip
+   * range (silent clip).
+   */
+  subtitles: z
+    .object({
+      cues: z.number().int().nonnegative(),
+      assPath: z.string().min(1),
+    })
+    .nullish(),
 });
 export type RenderClipResult = z.infer<typeof RenderClipResultSchema>;
 

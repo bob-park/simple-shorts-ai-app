@@ -1,10 +1,12 @@
 import type { Highlight } from '@shared/highlight';
 import type { RenderClipResult, RenderProgress, RenderResult } from '@shared/render';
 import type { TrackResult } from '@shared/track';
+import type { Word } from '@shared/transcript';
 import { promises as fsPromises } from 'node:fs';
 import { join } from 'node:path';
 
 import { buildSendcmd } from './SendcmdGenerator';
+import { type SubtitleStyle, buildAssFile } from './SubtitleGenerator';
 
 interface RunnerLike {
   run(opts: { args: readonly string[]; durationSec: number }): {
@@ -31,6 +33,10 @@ export interface RenderOptions {
   sourcePath: string;
   outputDir: string;
   highlights: Highlight[];
+  /** Whisper word-level timings, used to generate subtitle .ass files. */
+  transcriptWords?: Word[];
+  /** When provided AND words fall in the clip window, subtitles are burned in. */
+  subtitleOptions?: SubtitleStyle;
 }
 
 type ProgressHandler = (p: RenderProgress) => void;
@@ -89,10 +95,13 @@ export class RenderService {
       const durationSec = h.end_sec - h.start_sec;
 
       const trackingInfo = this.tracker ? await this.maybeTrackAndPersist(opts, h, clipIndex) : null;
-      const args =
+      const baseArgs =
         trackingInfo !== null
           ? buildTrackedArgs(opts.sourcePath, h, outputPath, trackingInfo.cmdPath)
           : buildCenterArgs(opts.sourcePath, h, outputPath);
+      const subtitlesInfo =
+        opts.subtitleOptions && opts.transcriptWords ? await this.maybeWriteSubtitles(opts, h, clipIndex) : null;
+      const args = subtitlesInfo ? appendSubtitleFilter(baseArgs, subtitlesInfo.assPath) : baseArgs;
 
       const handle = this.runner.run({ args, durationSec });
       this.activeHandle = handle;
@@ -111,6 +120,7 @@ export class RenderService {
             outputPath,
             undefined,
             trackingInfo ? { frames: trackingInfo.frameCount, trackPath: trackingInfo.trackPath } : null,
+            subtitlesInfo ? { cues: subtitlesInfo.cueCount, assPath: subtitlesInfo.assPath } : null,
           ),
         );
       } catch (e: unknown) {
@@ -162,6 +172,21 @@ export class RenderService {
     return { cmdPath, trackPath, frameCount: track.frames.length };
   }
 
+  private async maybeWriteSubtitles(
+    opts: RenderOptions,
+    h: Highlight,
+    clipIndex: number,
+  ): Promise<{ assPath: string; cueCount: number } | null> {
+    if (!opts.subtitleOptions || !opts.transcriptWords) return null;
+    const assContent = buildAssFile(opts.transcriptWords, h.start_sec, h.end_sec, opts.subtitleOptions);
+    if (assContent === '') return null; // no words in window
+    const assPath = join(opts.outputDir, `short_${clipIndex}.ass`);
+    await this.fs.writeFile(assPath, assContent, 'utf8');
+    // Cue count = number of Dialogue lines (one per cue).
+    const cueCount = (assContent.match(/^Dialogue:/gm) ?? []).length;
+    return { assPath, cueCount };
+  }
+
   private buildClipResult(
     index: number,
     h: Highlight,
@@ -169,6 +194,7 @@ export class RenderService {
     outputPath?: string,
     error?: string,
     tracking?: RenderClipResult['tracking'],
+    subtitles?: RenderClipResult['subtitles'],
   ): RenderClipResult {
     return {
       index,
@@ -179,6 +205,7 @@ export class RenderService {
       outputPath,
       error,
       tracking,
+      subtitles,
     };
   }
 }
@@ -229,4 +256,16 @@ function buildTrackedArgs(sourcePath: string, h: Highlight, outputPath: string, 
     ...COMMON_ENCODE_ARGS,
     outputPath,
   ];
+}
+
+function appendSubtitleFilter(args: readonly string[], assPath: string): string[] {
+  const out = [...args];
+  const vfIndex = out.indexOf('-vf');
+  if (vfIndex === -1) return out;
+  // Single-quote the path so ffmpeg's filter parser tolerates spaces (very
+  // common on macOS where users have spaces in their home dir / Documents
+  // path). Single quotes inside the path are filesystem-illegal on macOS, so
+  // no inner-escape is needed.
+  out[vfIndex + 1] = `${out[vfIndex + 1]},subtitles=filename='${assPath}'`;
+  return out;
 }

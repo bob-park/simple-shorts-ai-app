@@ -95,6 +95,9 @@ export function RenderCard(props: Props) {
                 {r.status === 'done' && r.tracking === null ? (
                   <p className="text-body-sm text-slate mt-xs">⊕ 중앙 크롭 폴백 (얼굴 미감지)</p>
                 ) : null}
+                {r.status === 'done' && r.subtitles ? (
+                  <p className="text-body-sm text-slate mt-xs">✏️ 자막 {r.subtitles.cues}개 cue</p>
+                ) : null}
                 {r.error ? <p className="text-body-sm text-brand-coral mt-xs">{r.error}</p> : null}
               </li>
             ))}
