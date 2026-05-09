@@ -14,7 +14,7 @@ import youtubeDl from 'youtube-dl-exec';
 
 import { FfmpegRunner } from './infra/FfmpegRunner';
 import { HistoryRepo } from './infra/HistoryRepo';
-import { OpenRouterClient } from './infra/OpenRouterClient';
+import { SidecarLlmClient } from './infra/SidecarLlmClient';
 import { PythonSidecar } from './infra/PythonSidecar';
 import { SecureStorage } from './infra/SecureStorage';
 import { SettingsStore } from './infra/SettingsStore';
@@ -38,7 +38,7 @@ let pythonSidecar: PythonSidecar | null = null;
 let transcribeService: TranscribeService | null = null;
 let transcribeProgressUnsub: (() => void) | null = null;
 
-let openRouterClient: OpenRouterClient | null = null;
+let sidecarLlmClient: SidecarLlmClient | null = null;
 let highlightService: HighlightService | null = null;
 let extractProgressUnsub: (() => void) | null = null;
 let extractInFlight = false;
@@ -122,6 +122,7 @@ function getTranscribeService(): TranscribeService {
   transcribeService = new TranscribeService(pythonSidecar);
 
   transcribeProgressUnsub = pythonSidecar.onProgress((p) => {
+    if (p.jobId === 'llm-download') return; // routed by SidecarLlmClient instead
     const win = BrowserWindow.getAllWindows()[0];
     if (win && !win.isDestroyed()) {
       win.webContents.send('transcribe:progress', p);
@@ -133,8 +134,16 @@ function getTranscribeService(): TranscribeService {
 
 function getHighlightService(): HighlightService {
   if (highlightService) return highlightService;
-  openRouterClient = new OpenRouterClient();
-  highlightService = new HighlightService(openRouterClient);
+  // Ensure the sidecar exists — same instance reused across transcribe/track/llm.
+  if (!pythonSidecar) {
+    getTranscribeService();
+  }
+  if (!pythonSidecar) {
+    throw new Error('PythonSidecar failed to initialise');
+  }
+  const modelPath = join(app.getPath('userData'), 'models', 'gemma-3-4b-it-Q4_K_M.gguf');
+  sidecarLlmClient = new SidecarLlmClient(pythonSidecar, modelPath);
+  highlightService = new HighlightService(sidecarLlmClient);
   extractProgressUnsub = highlightService.onProgress((p) => {
     const win = BrowserWindow.getAllWindows()[0];
     if (win && !win.isDestroyed()) {
@@ -311,30 +320,43 @@ void app.whenReady().then(() => {
   });
 
   ipcMain.handle('extract:run', async (_e, audioPath: string) => {
-    // Synchronous lock prevents a second invocation from overlapping while we
-    // await fs/HighlightService below — concurrent calls would otherwise both
-    // construct an AbortController on the singleton service, leaving the first
-    // call's signal orphaned and uncancellable.
     if (extractInFlight) {
       throw new Error('An extraction is already in progress');
     }
     extractInFlight = true;
     try {
-      const apiKey = await secureStorage.getKey();
-      if (!apiKey) {
-        throw new Error('OpenRouter API key is not set');
-      }
       const transcriptPath = `${audioPath}.transcript.json`;
       const transcriptRaw = await fsPromises.readFile(transcriptPath, 'utf8');
       const transcript = TranscriptSchema.parse(JSON.parse(transcriptRaw));
 
       const service = getHighlightService();
+
+      // Download model on demand if not yet present.
+      const status = await sidecarLlmClient!.modelStatus();
+      if (!status.exists) {
+        await fsPromises.mkdir(join(app.getPath('userData'), 'models'), { recursive: true });
+        await sidecarLlmClient!.downloadModel(
+          { repo: 'unsloth/gemma-3-4b-it-GGUF', filename: 'gemma-3-4b-it-Q4_K_M.gguf' },
+          (p) => {
+            const win = BrowserWindow.getAllWindows()[0];
+            if (win && !win.isDestroyed()) {
+              win.webContents.send('extract:progress', {
+                jobId: audioPath,
+                chunkIndex: 0,
+                chunkTotal: 0,
+                phase: 'download' as const,
+                downloadedBytes: p.processed,
+                totalBytes: p.total,
+              });
+            }
+          },
+        );
+      }
+
       const settings = settingsStore.get();
       const highlightSet = await service.extract({
         transcript,
         audioPath,
-        apiKey,
-        model: settings.llm.model,
         count: settings.shorts.defaultCount,
         minSec: settings.shorts.minSec,
         maxSec: settings.shorts.maxSec,
@@ -348,7 +370,31 @@ void app.whenReady().then(() => {
   });
 
   ipcMain.handle('extract:cancel', () => {
-    highlightService?.cancel();
+    // M11: local LLM chat is uncancellable once dispatched.
+    // The renderer's "취소" button is a no-op for now.
+  });
+
+  ipcMain.handle('llm:downloadModel', async () => {
+    getHighlightService(); // ensures sidecarLlmClient is initialized
+    if (!sidecarLlmClient) throw new Error('SidecarLlmClient not initialized');
+    const modelPath = join(app.getPath('userData'), 'models', 'gemma-3-4b-it-Q4_K_M.gguf');
+    await fsPromises.unlink(modelPath).catch(() => undefined);
+    await fsPromises.mkdir(join(app.getPath('userData'), 'models'), { recursive: true });
+    await sidecarLlmClient.downloadModel(
+      { repo: 'unsloth/gemma-3-4b-it-GGUF', filename: 'gemma-3-4b-it-Q4_K_M.gguf' },
+      (p) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('llm:downloadProgress', { processed: p.processed, total: p.total });
+        }
+      },
+    );
+  });
+
+  ipcMain.handle('llm:modelStatus', async () => {
+    getHighlightService(); // ensures sidecarLlmClient is initialized
+    if (!sidecarLlmClient) throw new Error('SidecarLlmClient not initialized');
+    return sidecarLlmClient.modelStatus();
   });
 
   ipcMain.handle('render:run', async (_e, audioPath: string) => {
@@ -476,9 +522,8 @@ app.on('window-all-closed', () => {
   transcribeService = null;
   extractProgressUnsub?.();
   extractProgressUnsub = null;
-  highlightService?.cancel();
   highlightService = null;
-  openRouterClient = null;
+  sidecarLlmClient = null;
   renderProgressUnsub?.();
   renderProgressUnsub = null;
   renderService?.cancel();
