@@ -89,6 +89,12 @@ export function RenderCard(props: Props) {
                   </span>
                 </p>
                 {r.outputPath ? <p className="text-body-sm text-slate mt-xs break-all">{r.outputPath}</p> : null}
+                {r.status === 'done' && r.tracking ? (
+                  <p className="text-body-sm text-slate mt-xs">🎯 얼굴 추적 {r.tracking.frames}프레임</p>
+                ) : null}
+                {r.status === 'done' && r.tracking === null ? (
+                  <p className="text-body-sm text-slate mt-xs">⊕ 중앙 크롭 폴백 (얼굴 미감지)</p>
+                ) : null}
                 {r.error ? <p className="text-body-sm text-brand-coral mt-xs">{r.error}</p> : null}
               </li>
             ))}
