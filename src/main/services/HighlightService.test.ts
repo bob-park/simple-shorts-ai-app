@@ -21,19 +21,19 @@ function makeTranscript(segmentCount: number, durationEach = 5): Transcript {
   };
 }
 
-describe('HighlightService (segment-based)', () => {
-  let chatJson: ReturnType<typeof vi.fn>;
-  let client: { chatJson: typeof chatJson };
+describe('HighlightService (segment-based, local LLM client)', () => {
+  let chat: ReturnType<typeof vi.fn>;
+  let client: { chat: typeof chat };
   let service: HighlightService;
 
   beforeEach(() => {
-    chatJson = vi.fn();
-    client = { chatJson };
+    chat = vi.fn();
+    client = { chat };
     service = new HighlightService(client as never);
   });
 
-  it('makes one LLM call for short transcripts and maps segment indices to time ranges', async () => {
-    chatJson.mockResolvedValue({
+  it('makes one chat call for short transcripts and maps segment indices to time ranges', async () => {
+    chat.mockResolvedValue({
       highlights: [
         { segment_indices: [0, 1], title: 'Opener', hook: 'It starts strong' },
         { segment_indices: [3, 4, 5], title: 'Mid', hook: 'Big reveal' },
@@ -42,14 +42,13 @@ describe('HighlightService (segment-based)', () => {
     const result = await service.extract({
       transcript: makeTranscript(50),
       audioPath: '/x.mp4',
-      apiKey: 'k',
-      model: 'm',
       count: 2,
       minSec: 5,
       maxSec: 60,
     });
-    expect(chatJson).toHaveBeenCalledTimes(1);
+    expect(chat).toHaveBeenCalledTimes(1);
     expect(result.highlights).toHaveLength(2);
+    expect(result.model).toBe('gemma-3-4b');
     expect(result.highlights[0]!.segments).toEqual([
       { start_sec: 0, end_sec: 5 },
       { start_sec: 5, end_sec: 10 },
@@ -61,15 +60,34 @@ describe('HighlightService (segment-based)', () => {
     ]);
   });
 
+  it('passes the correct schemaId per call (chunk vs rerank)', async () => {
+    chat
+      .mockResolvedValueOnce({ highlights: [{ segment_indices: [0, 1], title: 'C0', hook: 'h' }] })
+      .mockResolvedValueOnce({ highlights: [{ segment_indices: [0, 1], title: 'C1', hook: 'h' }] })
+      .mockResolvedValueOnce({ highlights: [{ segment_indices: [0, 1], title: 'C2', hook: 'h' }] })
+      .mockResolvedValueOnce({ highlights: [{ segment_indices: [90, 91], title: 'X', hook: 'h' }] });
+    await service.extract({
+      transcript: makeTranscript(200),
+      audioPath: '/x.mp4',
+      count: 1,
+      minSec: 5,
+      maxSec: 60,
+    });
+    expect(chat).toHaveBeenCalledTimes(4);
+    // First 3 are 'highlights' (per chunk); last is 'highlights_rerank'
+    expect(chat.mock.calls[0]![0].schemaId).toBe('highlights');
+    expect(chat.mock.calls[1]![0].schemaId).toBe('highlights');
+    expect(chat.mock.calls[2]![0].schemaId).toBe('highlights');
+    expect(chat.mock.calls[3]![0].schemaId).toBe('highlights_rerank');
+  });
+
   it('dedupes duplicate indices in the same highlight', async () => {
-    chatJson.mockResolvedValue({
+    chat.mockResolvedValue({
       highlights: [{ segment_indices: [0, 1, 1, 0], title: 'A', hook: 'h' }],
     });
     const result = await service.extract({
       transcript: makeTranscript(10),
       audioPath: '/x.mp4',
-      apiKey: 'k',
-      model: 'm',
       count: 1,
       minSec: 5,
       maxSec: 60,
@@ -78,14 +96,12 @@ describe('HighlightService (segment-based)', () => {
   });
 
   it('sorts segments chronologically regardless of LLM output order', async () => {
-    chatJson.mockResolvedValue({
+    chat.mockResolvedValue({
       highlights: [{ segment_indices: [5, 0, 3], title: 'A', hook: 'h' }],
     });
     const result = await service.extract({
       transcript: makeTranscript(10),
       audioPath: '/x.mp4',
-      apiKey: 'k',
-      model: 'm',
       count: 1,
       minSec: 5,
       maxSec: 60,
@@ -94,7 +110,7 @@ describe('HighlightService (segment-based)', () => {
   });
 
   it('drops highlights with out-of-bounds segment indices', async () => {
-    chatJson.mockResolvedValue({
+    chat.mockResolvedValue({
       highlights: [
         { segment_indices: [0, 1], title: 'Valid', hook: 'h' },
         { segment_indices: [99, 100], title: 'Invalid', hook: 'h' },
@@ -103,8 +119,6 @@ describe('HighlightService (segment-based)', () => {
     const result = await service.extract({
       transcript: makeTranscript(10),
       audioPath: '/x.mp4',
-      apiKey: 'k',
-      model: 'm',
       count: 5,
       minSec: 5,
       maxSec: 60,
@@ -114,21 +128,16 @@ describe('HighlightService (segment-based)', () => {
   });
 
   it('drops highlights whose total duration falls outside [minSec, maxSec]', async () => {
-    chatJson.mockResolvedValue({
+    chat.mockResolvedValue({
       highlights: [
-        // 1 segment × 5s = 5s — too short for minSec=20
         { segment_indices: [0], title: 'TooShort', hook: 'h' },
-        // 5 segments × 5s = 25s — within [20, 60]
         { segment_indices: [0, 1, 2, 3, 4], title: 'Good', hook: 'h' },
-        // 14 segments × 5s = 70s — exceeds maxSec=60
         { segment_indices: Array.from({ length: 14 }, (_, i) => i), title: 'TooLong', hook: 'h' },
       ],
     });
     const result = await service.extract({
       transcript: makeTranscript(20),
       audioPath: '/x.mp4',
-      apiKey: 'k',
-      model: 'm',
       count: 5,
       minSec: 20,
       maxSec: 60,
@@ -137,52 +146,31 @@ describe('HighlightService (segment-based)', () => {
   });
 
   it('rebases chunk-local indices to global when running multi-chunk + rerank', async () => {
-    // 200 segments → 2 chunks (chunkSize=100, overlap=10 → step=90)
-    //   chunk 0: indices 0..99    (firstIndex=0)
-    //   chunk 1: indices 90..189  (firstIndex=90)
-    //   chunk 2: indices 180..199 (firstIndex=180)
-    chatJson
-      .mockResolvedValueOnce({
-        // chunk 0 returns local index 5 → global 5
-        highlights: [{ segment_indices: [5, 6], title: 'C0', hook: 'h' }],
-      })
-      .mockResolvedValueOnce({
-        // chunk 1 returns local index 0 → global 90
-        highlights: [{ segment_indices: [0, 1], title: 'C1', hook: 'h' }],
-      })
-      .mockResolvedValueOnce({
-        // chunk 2 returns local index 5 → global 185
-        highlights: [{ segment_indices: [5, 6], title: 'C2', hook: 'h' }],
-      })
-      .mockResolvedValueOnce({
-        // rerank: pick the one spanning global 90..91
-        highlights: [{ segment_indices: [90, 91], title: 'C1', hook: 'h' }],
-      });
+    chat
+      .mockResolvedValueOnce({ highlights: [{ segment_indices: [5, 6], title: 'C0', hook: 'h' }] })
+      .mockResolvedValueOnce({ highlights: [{ segment_indices: [0, 1], title: 'C1', hook: 'h' }] })
+      .mockResolvedValueOnce({ highlights: [{ segment_indices: [5, 6], title: 'C2', hook: 'h' }] })
+      .mockResolvedValueOnce({ highlights: [{ segment_indices: [90, 91], title: 'C1', hook: 'h' }] });
     const result = await service.extract({
       transcript: makeTranscript(200),
       audioPath: '/x.mp4',
-      apiKey: 'k',
-      model: 'm',
       count: 1,
       minSec: 5,
       maxSec: 60,
     });
-    expect(chatJson).toHaveBeenCalledTimes(4); // 3 chunks + 1 rerank
     expect(result.highlights).toHaveLength(1);
     expect(result.highlights[0]!.segments).toEqual([
-      { start_sec: 450, end_sec: 455 }, // segment 90
-      { start_sec: 455, end_sec: 460 }, // segment 91
+      { start_sec: 450, end_sec: 455 },
+      { start_sec: 455, end_sec: 460 },
     ]);
   });
 
-  it('throws a step-tagged error when chunk LLM response is missing the highlights key', async () => {
-    chatJson.mockResolvedValueOnce({ candidates: [] });
+  it('throws step-tagged error when chunk LLM response shape is invalid', async () => {
+    chat.mockResolvedValueOnce({ candidates: [] }); // wrong key
     await expect(
       service.extract({
         transcript: makeTranscript(50),
         audioPath: '/x.mp4',
-        apiKey: 'k',
-        model: 'm',
         count: 1,
         minSec: 5,
         maxSec: 60,
@@ -190,39 +178,20 @@ describe('HighlightService (segment-based)', () => {
     ).rejects.toThrow(/invalid response shape on chunk 1\/1/i);
   });
 
-  it('throws a step-tagged error when rerank LLM response is missing the highlights key', async () => {
-    // 200 segments → 3 chunks → rerank.
-    chatJson
+  it('throws step-tagged error when rerank response shape is invalid', async () => {
+    chat
       .mockResolvedValueOnce({ highlights: [{ segment_indices: [0, 1], title: 'C0', hook: 'h' }] })
       .mockResolvedValueOnce({ highlights: [{ segment_indices: [0, 1], title: 'C1', hook: 'h' }] })
       .mockResolvedValueOnce({ highlights: [{ segment_indices: [0, 1], title: 'C2', hook: 'h' }] })
-      // rerank: model echoes input shape with `candidates` instead of `highlights`
       .mockResolvedValueOnce({ candidates: [{ segment_indices: [0, 1], title: 'X', hook: 'h' }] });
     await expect(
       service.extract({
         transcript: makeTranscript(200),
         audioPath: '/x.mp4',
-        apiKey: 'k',
-        model: 'm',
         count: 1,
         minSec: 5,
         maxSec: 60,
       }),
     ).rejects.toThrow(/invalid response shape on rerank step/i);
-  });
-
-  it('throws MissingApiKeyError when apiKey is empty', async () => {
-    await expect(
-      service.extract({
-        transcript: makeTranscript(10),
-        audioPath: '/x.mp4',
-        apiKey: '',
-        model: 'm',
-        count: 1,
-        minSec: 5,
-        maxSec: 60,
-      }),
-    ).rejects.toThrow(/OpenRouter API key is not set/i);
-    expect(chatJson).not.toHaveBeenCalled();
   });
 });
