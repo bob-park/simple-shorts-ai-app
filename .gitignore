@@ -87,3 +87,6 @@ sidecar/**/*.pyc
 sidecar/.pytest_cache/
 sidecar/.ruff_cache/
 sidecar/.mypy_cache/
+
+# M11: locally-downloaded GGUF models
+**/models/
