@@ -8,7 +8,7 @@ See `docs/superpowers/plans/` for milestone implementation plans.
 
 ## Toolchain
 
-This repo uses [mise](https://mise.jdx.dev/) to pin Node 24 + Yarn 4. Run `mise install` once after cloning.
+This repo uses [mise](https://mise.jdx.dev/) to pin Node 24 + Yarn 4 + Python 3.11 + uv. Run `mise install` once after cloning.
 
 ## Development
 
@@ -25,4 +25,5 @@ yarn lint
 - ✅ M1: Project Skeleton
 - ✅ M2: Settings page
 - ✅ M3: YouTube preview + download — paste a URL, see meta card, download with live progress and cancel.
-- ⏳ M4: Python sidecar + STT (next)
+- ✅ M4: Python sidecar + STT — uv-managed sidecar with faster-whisper, JSON-RPC stdio, lazy boot, transcript.json next to source.
+- ⏳ M5: LLM highlight extraction (next)
