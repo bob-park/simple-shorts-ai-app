@@ -231,3 +231,31 @@ def test_dispatches_llm_model_status_to_engine():
     msgs = _drain(outbound)
     assert {"id": "x1", "result": {"exists": True, "sizeBytes": 999, "loaded": False}} in msgs
     assert stub.called_with == "/tmp/m.gguf"
+
+
+def test_dispatches_llm_download_model_emits_progress_then_result():
+    class StubLlm:
+        def download_model(self, *, model_path, repo, filename, progress_callback):
+            progress_callback(0, 0)
+            progress_callback(100, 100)
+        def model_status(self, *_):
+            return {"exists": True, "sizeBytes": 0, "loaded": False}
+
+    inbound, outbound = _run_server_with([
+        {
+            "id": "d1",
+            "method": "llm_download_model",
+            "params": {"modelPath": "/tmp/m.gguf", "source": "u/g", "filename": "f.gguf"},
+        }
+    ])
+    server = Server(engine=StubEngine([]), llm_engine=StubLlm())
+    server.run(inbound, outbound)
+    msgs = _drain(outbound)
+    progress_msgs = [m for m in msgs if m.get("method") == "progress"]
+    result_msgs = [m for m in msgs if m.get("id") == "d1"]
+    # Two progress notifications (jobId="llm-download")
+    assert len(progress_msgs) == 2
+    assert progress_msgs[0]["params"]["jobId"] == "llm-download"
+    assert progress_msgs[1]["params"]["jobId"] == "llm-download"
+    # One final ok result
+    assert {"id": "d1", "result": {"ok": True}} in result_msgs

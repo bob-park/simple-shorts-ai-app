@@ -71,6 +71,9 @@ class Server:
         if method == "llm_model_status":
             self._handle_llm_model_status(msg, outbound)
             return
+        if method == "llm_download_model":
+            self._start_llm_download(msg, outbound)
+            return
         # Unknown method
         outbound.put(
             {
@@ -143,6 +146,75 @@ class Server:
                     "id": job_id,
                     "error": {
                         "code": "transcribe_failed",
+                        "message": f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
+                    },
+                }
+            )
+        finally:
+            with self._lock:
+                if self._active_job_id == job_id:
+                    self._active_job_id = None
+
+    def _start_llm_download(self, msg: dict, outbound: Queue) -> None:
+        with self._lock:
+            if self._worker is not None and self._worker.is_alive():
+                outbound.put(
+                    {
+                        "id": msg.get("id"),
+                        "error": {"code": "busy", "message": "another long-running job is in progress"},
+                    }
+                )
+                return
+            job_id = str(msg.get("id"))
+            self._active_job_id = job_id
+            self._cancel_event.clear()
+            self._worker = threading.Thread(
+                target=self._run_llm_download,
+                args=(job_id, msg.get("params") or {}, outbound),
+                daemon=True,
+            )
+            self._worker.start()
+
+    def _run_llm_download(self, job_id: str, params: dict, outbound: Queue) -> None:
+        model_path = params.get("modelPath")
+        repo = params.get("source") or params.get("repo")
+        filename = params.get("filename")
+        if not isinstance(model_path, str) or not isinstance(repo, str) or not isinstance(filename, str):
+            outbound.put(
+                {
+                    "id": job_id,
+                    "error": {"code": "invalid_params", "message": "modelPath, source, filename required"},
+                }
+            )
+            with self._lock:
+                if self._active_job_id == job_id:
+                    self._active_job_id = None
+            return
+        try:
+            def emit(processed: int, total: int) -> None:
+                outbound.put(
+                    {
+                        "method": "progress",
+                        "params": {
+                            "jobId": "llm-download",
+                            "processed": processed,
+                            "total": total,
+                        },
+                    }
+                )
+            self._llm_engine.download_model(
+                model_path=model_path,
+                repo=repo,
+                filename=filename,
+                progress_callback=emit,
+            )
+            outbound.put({"id": job_id, "result": {"ok": True}})
+        except Exception as e:
+            outbound.put(
+                {
+                    "id": job_id,
+                    "error": {
+                        "code": "llm_download_failed",
                         "message": f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
                     },
                 }
