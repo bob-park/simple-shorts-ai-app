@@ -1,3 +1,4 @@
+import type { ExtractProgress } from '@shared/extract';
 import type { AppApi } from '@shared/ipc';
 import type { Settings } from '@shared/settings';
 import type { TranscribeProgress } from '@shared/transcribe';
@@ -38,6 +39,16 @@ const api: AppApi = {
     };
   },
   sidecarHealth: () => ipcRenderer.invoke('sidecar:health'),
+
+  extractHighlights: (audioPath: string) => ipcRenderer.invoke('extract:run', audioPath),
+  cancelExtract: () => ipcRenderer.invoke('extract:cancel'),
+  onExtractProgress: (callback: (p: ExtractProgress) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, data: ExtractProgress) => callback(data);
+    ipcRenderer.on('extract:progress', handler);
+    return () => {
+      ipcRenderer.off('extract:progress', handler);
+    };
+  },
 
   revealInFolder: (absolutePath: string) => ipcRenderer.invoke('shell:reveal', absolutePath),
   openPath: (absolutePath: string) => ipcRenderer.invoke('shell:openPath', absolutePath),

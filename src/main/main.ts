@@ -1,4 +1,5 @@
 import type { Settings } from '@shared/settings';
+import { TranscriptSchema } from '@shared/transcript';
 import { sanitizeFilename } from '@shared/youtube';
 import { BrowserWindow, app, dialog, ipcMain, safeStorage, session, shell } from 'electron';
 import Store from 'electron-store';
@@ -8,9 +9,11 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import youtubeDl from 'youtube-dl-exec';
 
+import { OpenRouterClient } from './infra/OpenRouterClient';
 import { PythonSidecar } from './infra/PythonSidecar';
 import { SecureStorage } from './infra/SecureStorage';
 import { SettingsStore } from './infra/SettingsStore';
+import { HighlightService } from './services/HighlightService';
 import { TranscribeService } from './services/TranscribeService';
 import { type DownloadHandle, YouTubeService } from './services/YouTubeService';
 
@@ -25,6 +28,11 @@ let downloadStarting = false;
 let pythonSidecar: PythonSidecar | null = null;
 let transcribeService: TranscribeService | null = null;
 let transcribeProgressUnsub: (() => void) | null = null;
+
+let openRouterClient: OpenRouterClient | null = null;
+let highlightService: HighlightService | null = null;
+let extractProgressUnsub: (() => void) | null = null;
+let extractInFlight = false;
 
 function setupContentSecurityPolicy(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -103,6 +111,19 @@ function getTranscribeService(): TranscribeService {
   });
 
   return transcribeService;
+}
+
+function getHighlightService(): HighlightService {
+  if (highlightService) return highlightService;
+  openRouterClient = new OpenRouterClient();
+  highlightService = new HighlightService(openRouterClient);
+  extractProgressUnsub = highlightService.onProgress((p) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('extract:progress', p);
+    }
+  });
+  return highlightService;
 }
 
 void app.whenReady().then(() => {
@@ -213,6 +234,47 @@ void app.whenReady().then(() => {
     await shell.openPath(absolutePath);
   });
 
+  ipcMain.handle('extract:run', async (_e, audioPath: string) => {
+    // Synchronous lock prevents a second invocation from overlapping while we
+    // await fs/HighlightService below — concurrent calls would otherwise both
+    // construct an AbortController on the singleton service, leaving the first
+    // call's signal orphaned and uncancellable.
+    if (extractInFlight) {
+      throw new Error('An extraction is already in progress');
+    }
+    extractInFlight = true;
+    try {
+      const apiKey = await secureStorage.getKey();
+      if (!apiKey) {
+        throw new Error('OpenRouter API key is not set');
+      }
+      const transcriptPath = `${audioPath}.transcript.json`;
+      const transcriptRaw = await fsPromises.readFile(transcriptPath, 'utf8');
+      const transcript = TranscriptSchema.parse(JSON.parse(transcriptRaw));
+
+      const service = getHighlightService();
+      const settings = settingsStore.get();
+      const highlightSet = await service.extract({
+        transcript,
+        audioPath,
+        apiKey,
+        model: settings.llm.model,
+        count: settings.shorts.defaultCount,
+        minSec: settings.shorts.minSec,
+        maxSec: settings.shorts.maxSec,
+      });
+      const highlightsPath = `${audioPath}.highlights.json`;
+      await fsPromises.writeFile(highlightsPath, JSON.stringify(highlightSet, null, 2), 'utf8');
+      return { highlightsPath, highlightSet };
+    } finally {
+      extractInFlight = false;
+    }
+  });
+
+  ipcMain.handle('extract:cancel', () => {
+    highlightService?.cancel();
+  });
+
   createMainWindow();
 
   app.on('activate', () => {
@@ -226,5 +288,10 @@ app.on('window-all-closed', () => {
   pythonSidecar?.shutdown();
   pythonSidecar = null;
   transcribeService = null;
+  extractProgressUnsub?.();
+  extractProgressUnsub = null;
+  highlightService?.cancel();
+  highlightService = null;
+  openRouterClient = null;
   if (process.platform !== 'darwin') app.quit();
 });

@@ -1,4 +1,16 @@
 import '@testing-library/jest-dom/vitest';
+import { vi } from 'vitest';
+
+// Mock useNavigate from react-router-dom so components calling it outside a
+// Router context do not throw during unit tests.  Tests that need real routing
+// behaviour should wrap their render in <MemoryRouter>.
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>();
+  return {
+    ...actual,
+    useNavigate: () => vi.fn(),
+  };
+});
 
 // Node 24's bundled undici (node:internal/deps/undici/undici) validates the `signal`
 // option of `new Request()` against its own private AbortSignal reference, which is
