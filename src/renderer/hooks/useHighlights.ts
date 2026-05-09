@@ -79,14 +79,18 @@ export function useHighlights(): UseHighlights {
   }, []);
 
   const cancel = useCallback(async () => {
+    abortRef.current = true;
     await window.api.cancelExtract();
   }, []);
 
   const reset = useCallback(() => {
+    // Stop any in-flight extraction in the main process. Without this, a reset
+    // during the 'extracting' state leaves the IPC running on the main side; if
+    // the user starts a new extraction immediately, the orphaned call's result
+    // can race with and overwrite the new one in setState.
     abortRef.current = true;
-    void refreshKeyStatus().then(() => {
-      // refreshKeyStatus already sets state, nothing else to do
-    });
+    void window.api.cancelExtract();
+    void refreshKeyStatus();
   }, [refreshKeyStatus]);
 
   return { state, status: state.status, start, cancel, reset, refreshKeyStatus };

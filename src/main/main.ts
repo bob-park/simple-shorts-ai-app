@@ -1,4 +1,5 @@
 import type { Settings } from '@shared/settings';
+import { TranscriptSchema } from '@shared/transcript';
 import { sanitizeFilename } from '@shared/youtube';
 import { BrowserWindow, app, dialog, ipcMain, safeStorage, session, shell } from 'electron';
 import Store from 'electron-store';
@@ -31,6 +32,7 @@ let transcribeProgressUnsub: (() => void) | null = null;
 let openRouterClient: OpenRouterClient | null = null;
 let highlightService: HighlightService | null = null;
 let extractProgressUnsub: (() => void) | null = null;
+let extractInFlight = false;
 
 function setupContentSecurityPolicy(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -233,28 +235,40 @@ void app.whenReady().then(() => {
   });
 
   ipcMain.handle('extract:run', async (_e, audioPath: string) => {
-    const apiKey = await secureStorage.getKey();
-    if (!apiKey) {
-      throw new Error('OpenRouter API key is not set');
+    // Synchronous lock prevents a second invocation from overlapping while we
+    // await fs/HighlightService below — concurrent calls would otherwise both
+    // construct an AbortController on the singleton service, leaving the first
+    // call's signal orphaned and uncancellable.
+    if (extractInFlight) {
+      throw new Error('An extraction is already in progress');
     }
-    const transcriptPath = `${audioPath}.transcript.json`;
-    const transcriptRaw = await fsPromises.readFile(transcriptPath, 'utf8');
-    const transcript = JSON.parse(transcriptRaw);
+    extractInFlight = true;
+    try {
+      const apiKey = await secureStorage.getKey();
+      if (!apiKey) {
+        throw new Error('OpenRouter API key is not set');
+      }
+      const transcriptPath = `${audioPath}.transcript.json`;
+      const transcriptRaw = await fsPromises.readFile(transcriptPath, 'utf8');
+      const transcript = TranscriptSchema.parse(JSON.parse(transcriptRaw));
 
-    const service = getHighlightService();
-    const settings = settingsStore.get();
-    const highlightSet = await service.extract({
-      transcript,
-      audioPath,
-      apiKey,
-      model: settings.llm.model,
-      count: settings.shorts.defaultCount,
-      minSec: settings.shorts.minSec,
-      maxSec: settings.shorts.maxSec,
-    });
-    const highlightsPath = `${audioPath}.highlights.json`;
-    await fsPromises.writeFile(highlightsPath, JSON.stringify(highlightSet, null, 2), 'utf8');
-    return { highlightsPath, highlightSet };
+      const service = getHighlightService();
+      const settings = settingsStore.get();
+      const highlightSet = await service.extract({
+        transcript,
+        audioPath,
+        apiKey,
+        model: settings.llm.model,
+        count: settings.shorts.defaultCount,
+        minSec: settings.shorts.minSec,
+        maxSec: settings.shorts.maxSec,
+      });
+      const highlightsPath = `${audioPath}.highlights.json`;
+      await fsPromises.writeFile(highlightsPath, JSON.stringify(highlightSet, null, 2), 'utf8');
+      return { highlightsPath, highlightSet };
+    } finally {
+      extractInFlight = false;
+    }
   });
 
   ipcMain.handle('extract:cancel', () => {
