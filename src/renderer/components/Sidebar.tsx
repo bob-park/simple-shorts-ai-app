@@ -4,7 +4,6 @@ type NavItem = { to: string; label: string };
 
 const items: NavItem[] = [
   { to: '/', label: '새 작업' },
-  { to: '/progress', label: '작업 중' },
   { to: '/history', label: '히스토리' },
   { to: '/settings', label: '설정' },
 ];
