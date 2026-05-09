@@ -19,6 +19,7 @@ export type HighlightSegment = z.infer<typeof HighlightSegmentSchema>;
  * just `segments.length === 1` — degenerate case, same render path.
  */
 export const HighlightSchema = z.object({
+  /** 1+ time ranges in source video time. Sorted chronologically by start_sec. */
   segments: z.array(HighlightSegmentSchema).min(1),
   title: z.string().min(1),
   /** One-line hook describing why this clip would grab a viewer. */
