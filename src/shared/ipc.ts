@@ -1,3 +1,5 @@
+import type { ExtractProgress } from './extract';
+import type { HighlightSet } from './highlight';
 import type { Settings } from './settings';
 import type { TranscribeProgress } from './transcribe';
 import type { Transcript } from './transcript';
@@ -29,6 +31,18 @@ export interface AppApi {
   onTranscribeProgress(callback: (p: TranscribeProgress) => void): () => void;
   /** Health-check the Python sidecar (will boot it lazily if needed). */
   sidecarHealth(): Promise<{ ok: boolean; modelsLoaded: string[] }>;
+
+  /**
+   * Extract highlight clips from a previously-transcribed video. Reads the
+   * sibling `<audioPath>.transcript.json`, sends words to OpenRouter, writes
+   * `<audioPath>.highlights.json`. Throws `MissingApiKeyError` (message
+   * starts with `OpenRouter API key is not set`) if no key is configured.
+   */
+  extractHighlights(audioPath: string): Promise<{ highlightsPath: string; highlightSet: HighlightSet }>;
+  /** Cancel the active highlight extraction (no-op if none). */
+  cancelExtract(): Promise<void>;
+  /** Subscribe to extract progress notifications. Returns unsubscribe. */
+  onExtractProgress(callback: (p: ExtractProgress) => void): () => void;
 
   revealInFolder(absolutePath: string): Promise<void>;
   /** Open a file with the OS default app (e.g., transcript.json → text editor). */
