@@ -72,6 +72,9 @@ function installApiMock(overrides?: Partial<Window['api']>) {
     cancelRender: vi.fn(async () => undefined),
     onRenderProgress: vi.fn(() => () => undefined),
     openPath: vi.fn(async () => undefined),
+    historyList: vi.fn(async () => []),
+    historyGetDetail: vi.fn(async () => null),
+    historyDelete: vi.fn(async () => undefined),
     ...overrides,
   };
   Object.defineProperty(window, 'api', { value: api, writable: true, configurable: true });

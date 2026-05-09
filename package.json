@@ -22,6 +22,7 @@
   "prettier": "@bob-park/prettier-config-bobpark",
   "dependencies": {
     "@fontsource/dm-sans": "^5.1.0",
+    "better-sqlite3": "^11.5.0",
     "electron-store": "^10.0.0",
     "openai": "^4.71.0",
     "react": "^18.3.1",
@@ -39,6 +40,7 @@
     "@testing-library/jest-dom": "^6.5.0",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.5.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",

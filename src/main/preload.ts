@@ -1,4 +1,5 @@
 import type { ExtractProgress } from '@shared/extract';
+import type { HistoryListQuery } from '@shared/history';
 import type { AppApi } from '@shared/ipc';
 import type { RenderProgress } from '@shared/render';
 import type { Settings } from '@shared/settings';
@@ -60,6 +61,10 @@ const api: AppApi = {
       ipcRenderer.off('render:progress', handler);
     };
   },
+
+  historyList: (query: HistoryListQuery) => ipcRenderer.invoke('history:list', query),
+  historyGetDetail: (jobId: string) => ipcRenderer.invoke('history:getDetail', jobId),
+  historyDelete: (jobId: string) => ipcRenderer.invoke('history:delete', jobId),
 
   revealInFolder: (absolutePath: string) => ipcRenderer.invoke('shell:reveal', absolutePath),
   openPath: (absolutePath: string) => ipcRenderer.invoke('shell:openPath', absolutePath),

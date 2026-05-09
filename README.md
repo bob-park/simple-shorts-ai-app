@@ -30,4 +30,5 @@ yarn lint
 - ✅ M6: First end-to-end render — system ffmpeg, center-crop 9:16, sequential per-clip queue, partial success on per-clip failure.
 - ✅ M7: Smart face tracking — MediaPipe per-clip face tracking, Gaussian-smoothed sendcmd-driven dynamic crop, auto-fallback to center on detection failure.
 - ✅ M8: Subtitle burn-in — word-grouped TikTok-style ASS captions, libass-rendered in the same single-pass ffmpeg run, styled by Settings.
-- ⏳ M9: History persistence (next)
+- ✅ M9: History persistence — better-sqlite3 + FTS5, per-short ffmpeg thumbnails, list/grid view toggle, search/sort/status-filter, detail drawer with reveal/delete.
+- ⏳ M10: Packaging & distribution (next)
