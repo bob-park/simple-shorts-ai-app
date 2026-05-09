@@ -5,6 +5,8 @@ description = "Local STT + (later) face tracking sidecar for simple-shorts-ai-ap
 requires-python = ">=3.11,<3.13"
 dependencies = [
   "faster-whisper>=1.0.3",
+  "mediapipe>=0.10.18",
+  "opencv-python>=4.10",
 ]
 
 [dependency-groups]

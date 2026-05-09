@@ -24,7 +24,7 @@ export function RenderCard(props: Props) {
         <div className="gap-md flex flex-col">
           <h3 className="text-card-title text-ink font-semibold">숏츠 렌더링</h3>
           <p className="text-body-sm text-slate">
-            추출된 하이라이트 구간을 9:16 비율 mp4 파일로 변환합니다. (M6: 중앙 크롭, 자막 없음)
+            추출된 하이라이트 구간을 9:16 비율 mp4 파일로 변환합니다. 화자 얼굴을 자동으로 따라가며 중앙에 배치합니다.
           </p>
           <button
             type="button"
@@ -89,6 +89,12 @@ export function RenderCard(props: Props) {
                   </span>
                 </p>
                 {r.outputPath ? <p className="text-body-sm text-slate mt-xs break-all">{r.outputPath}</p> : null}
+                {r.status === 'done' && r.tracking ? (
+                  <p className="text-body-sm text-slate mt-xs">🎯 얼굴 추적 {r.tracking.frames}프레임</p>
+                ) : null}
+                {r.status === 'done' && r.tracking === null ? (
+                  <p className="text-body-sm text-slate mt-xs">⊕ 중앙 크롭 폴백 (얼굴 미감지)</p>
+                ) : null}
                 {r.error ? <p className="text-body-sm text-brand-coral mt-xs">{r.error}</p> : null}
               </li>
             ))}

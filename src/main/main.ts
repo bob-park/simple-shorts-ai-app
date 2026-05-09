@@ -17,6 +17,7 @@ import { SecureStorage } from './infra/SecureStorage';
 import { SettingsStore } from './infra/SettingsStore';
 import { HighlightService } from './services/HighlightService';
 import { RenderService } from './services/RenderService';
+import { TrackingService } from './services/TrackingService';
 import { TranscribeService } from './services/TranscribeService';
 import { type DownloadHandle, YouTubeService } from './services/YouTubeService';
 
@@ -41,6 +42,7 @@ let ffmpegRunner: FfmpegRunner | null = null;
 let renderService: RenderService | null = null;
 let renderProgressUnsub: (() => void) | null = null;
 let renderInFlight = false;
+let trackingService: TrackingService | null = null;
 
 function setupContentSecurityPolicy(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -137,7 +139,17 @@ function getHighlightService(): HighlightService {
 function getRenderService(): RenderService {
   if (renderService) return renderService;
   ffmpegRunner = new FfmpegRunner({ spawn });
-  renderService = new RenderService(ffmpegRunner);
+  // Tracking goes through the same Python sidecar that owns transcribe (lazy
+  // boot on first call). Reuse the existing PythonSidecar instance if it's
+  // already been spun up by transcribe; otherwise this triggers it.
+  if (!pythonSidecar) {
+    getTranscribeService();
+  }
+  if (!pythonSidecar) {
+    throw new Error('PythonSidecar failed to initialise');
+  }
+  trackingService = new TrackingService(pythonSidecar);
+  renderService = new RenderService(ffmpegRunner, { tracker: trackingService });
   renderProgressUnsub = renderService.onProgress((p) => {
     const win = BrowserWindow.getAllWindows()[0];
     if (win && !win.isDestroyed()) {
@@ -358,5 +370,6 @@ app.on('window-all-closed', () => {
   renderService?.cancel();
   renderService = null;
   ffmpegRunner = null;
+  trackingService = null;
   if (process.platform !== 'darwin') app.quit();
 });

@@ -4,7 +4,7 @@ import eslintConfig from '@bob-park/eslint-config-bobpark';
 import { defineConfig } from 'eslint/config';
 
 export default defineConfig([
-  { ignores: ['out/**', 'dist/**', 'release/**', 'node_modules/**', 'coverage/**'] },
+  { ignores: ['out/**', 'dist/**', 'release/**', 'node_modules/**', 'coverage/**', 'sidecar/**'] },
   {
     extends: [eslintConfig],
     languageOptions: {
