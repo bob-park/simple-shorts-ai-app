@@ -15,4 +15,4 @@ export const ExtractProgressSchema = z.object({
 });
 export type ExtractProgress = z.infer<typeof ExtractProgressSchema>;
 
-export type ExtractStatus = 'missing-key' | 'idle' | 'extracting' | 'done' | 'canceled' | 'error';
+export type ExtractStatus = 'idle' | 'downloading-model' | 'extracting' | 'done' | 'canceled' | 'error';

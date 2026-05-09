@@ -1,4 +1,3 @@
-import { ApiModelSection } from '@renderer/components/settings/ApiModelSection';
 import { OutputSection } from '@renderer/components/settings/OutputSection';
 import { PathsSection } from '@renderer/components/settings/PathsSection';
 import { SubtitlesSection } from '@renderer/components/settings/SubtitlesSection';
@@ -33,7 +32,6 @@ export function SettingsPage() {
         </p>
       </header>
 
-      <ApiModelSection />
       <PathsSection paths={settings.paths} onChange={(paths) => void update({ paths })} />
       <WhisperSection whisper={settings.whisper} onChange={(whisper) => void update({ whisper })} />
       <SubtitlesSection subtitles={settings.subtitles} onChange={(subtitles) => void update({ subtitles })} />

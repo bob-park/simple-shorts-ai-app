@@ -59,9 +59,9 @@ function installApiMock(overrides?: Partial<Window['api']>) {
     getSettings: vi.fn(async () => ({}) as never),
     updateSettings: vi.fn(async () => ({}) as never),
     resetSettings: vi.fn(async () => ({}) as never),
-    hasApiKey: vi.fn(async () => false),
-    setApiKey: vi.fn(async () => undefined),
-    clearApiKey: vi.fn(async () => undefined),
+    llmModelStatus: vi.fn(async () => ({ exists: true, sizeBytes: 2500000000, loaded: false })),
+    llmDownloadModel: vi.fn(async () => undefined),
+    onLlmDownloadProgress: vi.fn(() => () => undefined),
     pickFolder: vi.fn(async () => null),
     fetchVideoPreview: calls.fetchVideoPreview,
     downloadVideo: calls.downloadVideo,
@@ -136,25 +136,8 @@ describe('NewJobPage', () => {
     await waitFor(() => expect(calls.transcribeFile).toHaveBeenCalledWith('/tmp/dQw4w9WgXcQ.mp4'));
   });
 
-  it('shows the missing-key state when no API key is set', async () => {
-    installApiMock({
-      hasApiKey: vi.fn(async () => false),
-    });
-    const user = userEvent.setup();
-    render(<NewJobPage />);
-    await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
-    await user.click(screen.getByRole('button', { name: '미리보기' }));
-    await waitFor(() => screen.getByRole('button', { name: '다운로드' }));
-    await user.click(screen.getByRole('button', { name: '다운로드' }));
-    await waitFor(() => screen.getByRole('button', { name: 'STT 시작' }));
-    await user.click(screen.getByRole('button', { name: 'STT 시작' }));
-    await waitFor(() => screen.getByRole('button', { name: '설정으로 이동' }));
-  });
-
   it('shows the 하이라이트 추출 button after transcribe completes and triggers extractHighlights on click', async () => {
-    const calls = installApiMock({
-      hasApiKey: vi.fn(async () => true),
-    });
+    const calls = installApiMock();
     const user = userEvent.setup();
     render(<NewJobPage />);
     await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
@@ -169,7 +152,7 @@ describe('NewJobPage', () => {
   });
 
   it('shows the 숏츠 만들기 button after highlights complete and triggers renderShorts on click', async () => {
-    const calls = installApiMock({ hasApiKey: vi.fn(async () => true) });
+    const calls = installApiMock();
     const user = userEvent.setup();
     render(<NewJobPage />);
     await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');

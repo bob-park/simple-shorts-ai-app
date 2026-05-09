@@ -14,9 +14,15 @@ const api: AppApi = {
   updateSettings: (patch: Partial<Settings>) => ipcRenderer.invoke('settings:update', patch),
   resetSettings: () => ipcRenderer.invoke('settings:reset'),
 
-  hasApiKey: () => ipcRenderer.invoke('secure:hasKey'),
-  setApiKey: (key: string) => ipcRenderer.invoke('secure:setKey', key),
-  clearApiKey: () => ipcRenderer.invoke('secure:clearKey'),
+  llmModelStatus: () => ipcRenderer.invoke('llm:modelStatus'),
+  llmDownloadModel: () => ipcRenderer.invoke('llm:downloadModel'),
+  onLlmDownloadProgress: (callback: (p: { processed: number; total: number }) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, data: { processed: number; total: number }) => callback(data);
+    ipcRenderer.on('llm:downloadProgress', handler);
+    return () => {
+      ipcRenderer.off('llm:downloadProgress', handler);
+    };
+  },
 
   pickFolder: (opts) => ipcRenderer.invoke('dialog:pickFolder', opts),
 

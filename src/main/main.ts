@@ -14,10 +14,10 @@ import youtubeDl from 'youtube-dl-exec';
 
 import { FfmpegRunner } from './infra/FfmpegRunner';
 import { HistoryRepo } from './infra/HistoryRepo';
-import { SidecarLlmClient } from './infra/SidecarLlmClient';
 import { PythonSidecar } from './infra/PythonSidecar';
 import { SecureStorage } from './infra/SecureStorage';
 import { SettingsStore } from './infra/SettingsStore';
+import { SidecarLlmClient } from './infra/SidecarLlmClient';
 import { HighlightService } from './services/HighlightService';
 import { HistoryService } from './services/HistoryService';
 import { RenderService } from './services/RenderService';
