@@ -4,7 +4,7 @@ import type { Settings } from '@shared/settings';
 import { TranscriptSchema, type Word } from '@shared/transcript';
 import { VideoMetaSchema, sanitizeFilename } from '@shared/youtube';
 import Database from 'better-sqlite3';
-import { BrowserWindow, app, dialog, ipcMain, session, shell } from 'electron';
+import { BrowserWindow, Notification, app, dialog, ipcMain, session, shell } from 'electron';
 import Store from 'electron-store';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, promises as fsPromises } from 'node:fs';
@@ -124,6 +124,27 @@ let historyRepo: HistoryRepo | null = null;
 let historyService: HistoryService | null = null;
 let resumeService: ResumeService | null = null;
 let setupWizard: SetupWizardService | null = null;
+
+/**
+ * Show a desktop notification for a completed pipeline stage. Skipped when
+ * the app window is currently focused — if the user is watching the UI they
+ * already see the result, so a notification would just be noise. Click on
+ * the notification focuses the window.
+ */
+function notifyStageComplete(title: string, body: string): void {
+  if (!Notification.isSupported()) return;
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win && !win.isDestroyed() && win.isFocused()) return;
+  const n = new Notification({ title, body, silent: false });
+  n.on('click', () => {
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    }
+  });
+  n.show();
+}
 
 function setupContentSecurityPolicy(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -385,9 +406,11 @@ void app.whenReady().then(() => {
     }
     downloadStarting = true;
     let handle: DownloadHandle | null = null;
+    let metaTitle = '';
     try {
       const settings = settingsStore.get();
       const meta = await youtubeService.fetchMeta(url);
+      metaTitle = meta.title;
       // Filename = sanitized title (max 20 chars), with the video id as a
       // safety fallback if sanitization strips the title to nothing.
       const stem = sanitizeFilename(meta.title, 20) || meta.id;
@@ -416,7 +439,11 @@ void app.whenReady().then(() => {
         // Non-fatal — history record will fall back to a stub if missing.
         process.stderr.write(`[m9] failed to write meta.json: ${(e as Error).message}\n`);
       }
+      notifyStageComplete('다운로드 완료', metaTitle || basename(result.outputPath));
       return { outputPath: result.outputPath };
+    } catch (e) {
+      notifyStageComplete('다운로드 실패', `${metaTitle ? `${metaTitle}: ` : ''}${(e as Error).message}`);
+      throw e;
     } finally {
       activeDownload = null;
       downloadStarting = false; // also clears on early throw before handle was set
@@ -432,15 +459,22 @@ void app.whenReady().then(() => {
   });
 
   ipcMain.handle('transcribe:run', async (_e, audioPath: string) => {
-    const service = getTranscribeService();
-    const settings = settingsStore.get();
-    const transcript = await service.transcribe(audioPath, {
-      model: settings.whisper.model,
-      language: settings.whisper.language,
-    });
-    const transcriptPath = `${audioPath}.transcript.json`;
-    await fsPromises.writeFile(transcriptPath, JSON.stringify(transcript, null, 2), 'utf8');
-    return { transcriptPath, transcript };
+    const fileLabel = basename(audioPath);
+    try {
+      const service = getTranscribeService();
+      const settings = settingsStore.get();
+      const transcript = await service.transcribe(audioPath, {
+        model: settings.whisper.model,
+        language: settings.whisper.language,
+      });
+      const transcriptPath = `${audioPath}.transcript.json`;
+      await fsPromises.writeFile(transcriptPath, JSON.stringify(transcript, null, 2), 'utf8');
+      notifyStageComplete('자막 추출 완료', fileLabel);
+      return { transcriptPath, transcript };
+    } catch (e) {
+      notifyStageComplete('자막 추출 실패', `${fileLabel}: ${(e as Error).message}`);
+      throw e;
+    }
   });
 
   ipcMain.handle('transcribe:cancel', async () => {
@@ -461,6 +495,7 @@ void app.whenReady().then(() => {
       throw new Error('An extraction is already in progress');
     }
     extractInFlight = true;
+    const fileLabel = basename(audioPath);
     try {
       const transcriptPath = `${audioPath}.transcript.json`;
       const transcriptRaw = await fsPromises.readFile(transcriptPath, 'utf8');
@@ -497,7 +532,11 @@ void app.whenReady().then(() => {
       });
       const highlightsPath = `${audioPath}.highlights.json`;
       await fsPromises.writeFile(highlightsPath, JSON.stringify(highlightSet, null, 2), 'utf8');
+      notifyStageComplete('하이라이트 추출 완료', `${fileLabel} · ${highlightSet.highlights.length}개`);
       return { highlightsPath, highlightSet };
+    } catch (e) {
+      notifyStageComplete('하이라이트 추출 실패', `${fileLabel}: ${(e as Error).message}`);
+      throw e;
     } finally {
       extractInFlight = false;
     }
@@ -536,6 +575,7 @@ void app.whenReady().then(() => {
       throw new Error('A render is already in progress');
     }
     renderInFlight = true;
+    const fileLabel = basename(audioPath);
     try {
       const highlightsPath = `${audioPath}.highlights.json`;
       let raw: string;
@@ -605,7 +645,14 @@ void app.whenReady().then(() => {
         process.stderr.write(`[m9] failed to record history: ${(e as Error).message}\n`);
       }
 
+      const okCount = renderResult.results.filter((r) => r.status === 'done').length;
+      const failed = renderResult.results.length - okCount;
+      const body = failed === 0 ? `${fileLabel} · ${okCount}개` : `${fileLabel} · ${okCount}개 완료, ${failed}개 실패/취소`;
+      notifyStageComplete('렌더링 완료', body);
       return renderResult;
+    } catch (e) {
+      notifyStageComplete('렌더링 실패', `${fileLabel}: ${(e as Error).message}`);
+      throw e;
     } finally {
       renderInFlight = false;
     }
