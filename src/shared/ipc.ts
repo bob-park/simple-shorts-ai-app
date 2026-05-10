@@ -2,6 +2,7 @@ import type { ExtractProgress } from './extract';
 import type { HighlightSet } from './highlight';
 import type { HistoryListQuery, JobDetail, JobSummary } from './history';
 import type { RenderProgress, RenderResult } from './render';
+import type { ResumeSnapshot } from './resume';
 import type { Settings } from './settings';
 import type { TranscribeProgress } from './transcribe';
 import type { Transcript } from './transcript';
@@ -42,6 +43,11 @@ export interface AppApi {
   cancelExtract(): Promise<void>;
   /** Subscribe to extract progress notifications. Returns unsubscribe. */
   onExtractProgress(callback: (p: ExtractProgress) => void): () => void;
+
+  /** Detect prior pipeline run by videoId. Returns null if none. */
+  resumeDetect(videoId: string): Promise<ResumeSnapshot | null>;
+  /** Build snapshot from a known sourcePath (used by History "이어서 작업"). */
+  resumeHydrate(sourcePath: string): Promise<ResumeSnapshot | null>;
 
   /**
    * Render every highlight in the sibling `<audioPath>.highlights.json` into

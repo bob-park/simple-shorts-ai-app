@@ -38,6 +38,8 @@ function installApiMock(jobs: JobSummary[] = []) {
     historyDelete: calls.historyDelete,
     revealInFolder: vi.fn(async () => undefined),
     openPath: vi.fn(async () => undefined),
+    resumeDetect: vi.fn(async (_id: string) => null),
+    resumeHydrate: vi.fn(async (_p: string) => null),
   };
   Object.defineProperty(window, 'api', { value: api, writable: true, configurable: true });
   return calls;
