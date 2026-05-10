@@ -159,5 +159,6 @@ describe('HistoryPage', () => {
     const resumeBtn = await screen.findByRole('button', { name: '이어서 작업' });
     await user.click(resumeBtn);
     expect(window.api.resumeHydrate).toHaveBeenCalled();
+    expect(mockHydrate).toHaveBeenCalledWith(snap);
   });
 });

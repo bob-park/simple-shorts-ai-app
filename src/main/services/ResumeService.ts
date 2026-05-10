@@ -152,8 +152,8 @@ export class ResumeService {
         montageDurationSec,
         status: 'done' as const,
         outputPath: join(outputDir, file),
-        tracking: null,
-        subtitles: null,
+        tracking: undefined,
+        subtitles: undefined,
       };
     });
     return { outputDir, result: { outputDir, results } };
