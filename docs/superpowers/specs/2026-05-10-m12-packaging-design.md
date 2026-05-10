@@ -143,12 +143,16 @@ extraResources:
 A new `sidecar/requirements.txt` (or pinned subset of `pyproject.toml`) lists the exact deps needed at runtime:
 
 ```
-faster-whisper==1.0.3
-mediapipe==0.10.18
-opencv-python==4.10.0.84
+faster-whisper>=1.0.3
+mediapipe>=0.10.18
+opencv-python>=4.10
+llama-cpp-python>=0.3.22
+huggingface-hub==0.26.5
 ```
 
-Versions match the current dev environment. uv reads this file in the setup wizard's pip install step.
+Mirrors `sidecar/pyproject.toml` (added in M11). `llama-cpp-python` is the heaviest single dep (~100MB + native build) — first-run setup is closer to 3-5 minutes than 1-3 minutes. The setup wizard's progress copy should reflect this.
+
+Note: this file is read by the packaged app's setup wizard, NOT by uv during dev (`uv sync` reads `pyproject.toml` directly). The two are kept in sync manually; if a future task adds a new sidecar dep, both files need updating.
 
 ---
 
