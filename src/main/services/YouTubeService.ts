@@ -1,6 +1,10 @@
 import { type VideoMeta, VideoMetaSchema, isYoutubeUrl } from '@shared/youtube';
 import type { DownloadProgress } from '@shared/youtube';
+import { randomBytes } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { promises as fsp } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 export type YoutubeDlLike = (url: string, flags: Record<string, unknown>) => Promise<unknown>;
 
@@ -42,9 +46,14 @@ const PROGRESS_TEMPLATE =
   'progress: %(progress._percent_str)s|%(progress._eta_str)s|%(progress._downloaded_bytes_str)s|%(progress._total_bytes_str)s';
 const PROGRESS_LINE = /^progress:\s*([\d.]+)%\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*$/;
 
-const OUTFILE_PREFIX = 'OUTFILE:';
-/** yt-dlp's `after_move` hook fires after any merge/remux with the final filepath. */
-const PRINT_TEMPLATE = `after_move:${OUTFILE_PREFIX}%(filepath)s`;
+/**
+ * yt-dlp's `after_move` hook fires after any merge/remux with the final
+ * filepath. We route it through `--print-to-file` to a temp file rather
+ * than `--print` because in yt-dlp 2026+, `--print` paired with
+ * `--progress-template` suppresses progress output entirely — we'd lose
+ * the % bar in the UI.
+ */
+const PRINT_TEMPLATE = `after_move:%(filepath)s`;
 /**
  * Best video + best audio. We deliberately don't pin the container to mp4 —
  * YouTube increasingly serves AV1/VP9 in webm or mp4, and forcing mp4 either
@@ -86,6 +95,7 @@ export class YouTubeService {
     if (!isYoutubeUrl(url)) {
       throw new Error(`URL is not a recognized YouTube link: ${url}`);
     }
+    const printOutPath = join(tmpdir(), `shorts-ai-ytdlp-${randomBytes(8).toString('hex')}.txt`);
     const args = [
       url,
       '--output',
@@ -95,8 +105,9 @@ export class YouTubeService {
       '--no-playlist',
       '--newline',
       `--progress-template=${PROGRESS_TEMPLATE}`,
-      '--print',
+      '--print-to-file',
       PRINT_TEMPLATE,
+      printOutPath,
     ];
     if (this.deps.ffmpegLocation) {
       args.push('--ffmpeg-location', this.deps.ffmpegLocation);
@@ -105,16 +116,11 @@ export class YouTubeService {
 
     const progressCallbacks: ((p: DownloadProgress) => void)[] = [];
     let stderrBuffer = '';
-    let capturedPath: string | null = null;
     let canceled = false;
 
     child.stdout.on('data', (chunk: Buffer) => {
       const lines = chunk.toString().split(/\r?\n/);
       for (const line of lines) {
-        if (line.startsWith(OUTFILE_PREFIX)) {
-          capturedPath = line.slice(OUTFILE_PREFIX.length).trim();
-          continue;
-        }
         const m = PROGRESS_LINE.exec(line);
         if (!m) continue;
         const [, pctStr, etaStr, downStr, totStr] = m;
@@ -138,7 +144,21 @@ export class YouTubeService {
         // Defer one tick so any buffered stdout/stderr data events can fire
         // before we read the captured state (Node Readables emit 'data' via
         // process.nextTick, which can post-date a synchronous 'exit').
-        setImmediate(() => {
+        setImmediate(async () => {
+          // Read the after_move filepath that yt-dlp wrote to printOutPath.
+          // The file may contain multiple lines if the hook fired more than
+          // once (unusual); take the LAST non-empty one as the final location.
+          let capturedPath: string | null = null;
+          try {
+            const raw = await fsp.readFile(printOutPath, 'utf8');
+            const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
+            capturedPath = lines.length > 0 ? lines[lines.length - 1]!.trim() : null;
+          } catch {
+            // File never created (yt-dlp failed before any after_move) — leave null.
+          }
+          // Best-effort cleanup; ignore failures.
+          fsp.unlink(printOutPath).catch(() => undefined);
+
           if (canceled) {
             reject(new Error('Download canceled'));
             return;

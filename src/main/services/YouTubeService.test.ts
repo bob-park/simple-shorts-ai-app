@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { promises as fsp } from 'node:fs';
 import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -94,10 +95,15 @@ describe('YouTubeService.download', () => {
     expect(args).toContain('--output');
     expect(args).toContain('/tmp/My Video.%(ext)s');
     // Container is intentionally NOT forced to mp4 — yt-dlp picks the native
-    // format and `OUTFILE:` reports the actual extension back.
+    // format and the after_move hook reports the actual extension back.
     expect(args).not.toContain('--merge-output-format');
-    expect(args).toContain('--print');
-    expect(args.some((a) => a.startsWith('after_move:OUTFILE:'))).toBe(true);
+    // `--print-to-file` (not `--print`) — see PRINT_TEMPLATE comment in
+    // YouTubeService for why progress would otherwise be suppressed.
+    expect(args).toContain('--print-to-file');
+    const ptfIdx = args.indexOf('--print-to-file');
+    expect(args[ptfIdx + 1]).toBe('after_move:%(filepath)s');
+    // The third arg after --print-to-file is the temp file path yt-dlp writes to.
+    expect(args[ptfIdx + 2]).toMatch(/shorts-ai-ytdlp-[0-9a-f]+\.txt$/);
     expect(args).toContain('--newline');
     expect(args.some((a) => a.startsWith('--progress-template'))).toBe(true);
   });
@@ -121,15 +127,20 @@ describe('YouTubeService.download', () => {
     const handle = service.download('https://youtu.be/abc', '/tmp/My Video', {
       videoId: 'abc',
     });
-    child.stdout.push('OUTFILE:/tmp/My Video.mp4\n');
+    // Service writes its --print-to-file path into spawn args; simulate yt-dlp
+    // by writing the after_move path into that file before exit.
+    const args = spawn.mock.calls[0]?.[1] as string[];
+    const printOutPath = args[args.indexOf('--print-to-file') + 2]!;
+    await fsp.writeFile(printOutPath, '/tmp/My Video.mp4\n', 'utf8');
     child.emit('exit', 0);
     await expect(handle.done).resolves.toEqual({ outputPath: '/tmp/My Video.mp4' });
   });
 
-  it('rejects done with a clear error when exit 0 but no OUTFILE was emitted', async () => {
+  it('rejects done with a clear error when exit 0 but no after_move filepath was emitted', async () => {
     const handle = service.download('https://youtu.be/abc', '/tmp/abc', {
       videoId: 'abc',
     });
+    // No file written → service can't determine final output location.
     child.emit('exit', 0);
     await expect(handle.done).rejects.toThrow(/after_move/i);
   });
