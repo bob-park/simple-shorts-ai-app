@@ -53,6 +53,7 @@ $userData/models/                              # Electron app.getPath('userData'
 ```
 
 `$userData` resolves to:
+
 - macOS: `~/Library/Application Support/simple-shorts-ai-app/`
 - (M12 packaged: `~/Library/Application Support/Shorts AI/`)
 
@@ -364,15 +365,15 @@ The `extracting` state's `progress` discriminator gets a new `phase: 'download'`
 
 ## 6. Failure handling
 
-| Failure | UX |
-|---|---|
-| Model file missing on extract trigger | Auto-trigger download first; user sees `downloading-model` state |
-| Download network error | `error` state with stderr tail + 다시 시도 |
-| Download canceled (user closes app) | Partial file deleted on next sidecar boot's startup check |
-| Sidecar OOM during model load (Intel Mac, 4GB-class hardware) | `error` state with "메모리 부족" message; suggestion: 더 작은 모델 (out of v1 since 4B is fixed) |
-| llama-cpp-python wheel install failure (rare) | Sidecar boot fails → existing M4 sidecar-down flow kicks in; UI shows "사이드카 시작 실패" |
-| GBNF grammar rejects model output (shouldn't happen by construction) | `error` state with "LLM 응답 파싱 실패" — should never trigger; safety net |
-| Model loaded but generates empty highlights array | Same as M10's existing "0 highlights" path (UI shows 0개 추출) |
+| Failure                                                              | UX                                                                                               |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Model file missing on extract trigger                                | Auto-trigger download first; user sees `downloading-model` state                                 |
+| Download network error                                               | `error` state with stderr tail + 다시 시도                                                       |
+| Download canceled (user closes app)                                  | Partial file deleted on next sidecar boot's startup check                                        |
+| Sidecar OOM during model load (Intel Mac, 4GB-class hardware)        | `error` state with "메모리 부족" message; suggestion: 더 작은 모델 (out of v1 since 4B is fixed) |
+| llama-cpp-python wheel install failure (rare)                        | Sidecar boot fails → existing M4 sidecar-down flow kicks in; UI shows "사이드카 시작 실패"       |
+| GBNF grammar rejects model output (shouldn't happen by construction) | `error` state with "LLM 응답 파싱 실패" — should never trigger; safety net                       |
+| Model loaded but generates empty highlights array                    | Same as M10's existing "0 highlights" path (UI shows 0개 추출)                                   |
 
 ---
 
@@ -380,14 +381,14 @@ The `extracting` state's `progress` discriminator gets a new `phase: 'download'`
 
 ### 7.1 Unit tests
 
-| File | Cases |
-|---|---|
-| `SidecarLlmClient.test.ts` (new) | RPC call shape, schemaId mapping, error propagation. Mock sidecar. ~4 cases |
-| `HighlightService.test.ts` | (rewrite) operates on new client mock returning `{ highlights: [...] }`. Existing 9 cases adapt — same asserts, simpler client. |
-| `Settings.test.tsx` (or LlmSection-specific) | (rewrite) no API key input, model status card displays correctly in 3 states. ~3 cases |
-| `HighlightCard` smoke test | (update) `downloading-model` state renders progress; `idle` triggers download flow when model missing |
-| `tests/renderer/App.test.tsx` | (no change — already passes since OpenRouter wasn't asserted) |
-| `tests/sidecar/test_llm.py` (new) | GBNF grammar parses sample outputs; download-progress callback fires; cleanup of `.partial` on exception. ~5 cases |
+| File                                         | Cases                                                                                                                           |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `SidecarLlmClient.test.ts` (new)             | RPC call shape, schemaId mapping, error propagation. Mock sidecar. ~4 cases                                                     |
+| `HighlightService.test.ts`                   | (rewrite) operates on new client mock returning `{ highlights: [...] }`. Existing 9 cases adapt — same asserts, simpler client. |
+| `Settings.test.tsx` (or LlmSection-specific) | (rewrite) no API key input, model status card displays correctly in 3 states. ~3 cases                                          |
+| `HighlightCard` smoke test                   | (update) `downloading-model` state renders progress; `idle` triggers download flow when model missing                           |
+| `tests/renderer/App.test.tsx`                | (no change — already passes since OpenRouter wasn't asserted)                                                                   |
+| `tests/sidecar/test_llm.py` (new)            | GBNF grammar parses sample outputs; download-progress callback fires; cleanup of `.partial` on exception. ~5 cases              |
 
 Net: ~10 vitest changes (some additions, some deletions of OpenRouter tests). Sidecar pytest +5. Total target: ~185 vitest, 29 sidecar pytest.
 
@@ -420,17 +421,17 @@ This is acceptable because the project is pre-launch and the user is the sole te
 
 ## 9. Risk + edge cases
 
-| Risk | Mitigation |
-|---|---|
-| llama-cpp-python wheel for macOS arm64 + Metal not on PyPI for current version | Pin version 0.3.2 (verified availability at brainstorming time); on install failure, fall back to CPU wheel — slower but functional |
-| Gemma 3 4B Q4_K_M quality on multi-chunk rerank insufficient | Acceptable degraded quality for v1; if narrative judgments are obviously worse, document as known limitation. M11+ can swap to 12B or revisit |
-| First load (~3s) feels broken to user | UI shows "모델 로딩 중..." between download completion and first chunk progress event |
-| Sidecar process memory grows by ~5GB after model load | Document; user should close other heavy apps. No mitigation in v1. Future: explicit "모델 언로드" button |
-| Intel Mac users without GPU acceleration get very slow inference | Document; can take 30+ seconds per chunk. Out-of-scope to optimize for Intel. |
-| Model download hash mismatch (HuggingFace repo updated) | Verify SHA-256 against pinned hash in `sidecar/handlers/llm.py`; mismatch → reject and re-download |
-| HuggingFace requires auth for some Gemma repos | Use the `unsloth/gemma-3-4b-it-GGUF` mirror (verified public, no auth required) |
-| GBNF grammar bug causes infinite output | `max_tokens=4096` cap + grammar must always reach a `}` close — test against pathological inputs |
-| Transition: m10's HighlightService.test.ts has 9 tests that assume OpenRouter shape | Plan task explicitly rewrites these — included in 7.1 above |
+| Risk                                                                                | Mitigation                                                                                                                                    |
+| ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| llama-cpp-python wheel for macOS arm64 + Metal not on PyPI for current version      | Pin version 0.3.2 (verified availability at brainstorming time); on install failure, fall back to CPU wheel — slower but functional           |
+| Gemma 3 4B Q4_K_M quality on multi-chunk rerank insufficient                        | Acceptable degraded quality for v1; if narrative judgments are obviously worse, document as known limitation. M11+ can swap to 12B or revisit |
+| First load (~3s) feels broken to user                                               | UI shows "모델 로딩 중..." between download completion and first chunk progress event                                                         |
+| Sidecar process memory grows by ~5GB after model load                               | Document; user should close other heavy apps. No mitigation in v1. Future: explicit "모델 언로드" button                                      |
+| Intel Mac users without GPU acceleration get very slow inference                    | Document; can take 30+ seconds per chunk. Out-of-scope to optimize for Intel.                                                                 |
+| Model download hash mismatch (HuggingFace repo updated)                             | Verify SHA-256 against pinned hash in `sidecar/handlers/llm.py`; mismatch → reject and re-download                                            |
+| HuggingFace requires auth for some Gemma repos                                      | Use the `unsloth/gemma-3-4b-it-GGUF` mirror (verified public, no auth required)                                                               |
+| GBNF grammar bug causes infinite output                                             | `max_tokens=4096` cap + grammar must always reach a `}` close — test against pathological inputs                                              |
+| Transition: m10's HighlightService.test.ts has 9 tests that assume OpenRouter shape | Plan task explicitly rewrites these — included in 7.1 above                                                                                   |
 
 ---
 
@@ -452,7 +453,7 @@ This is acceptable because the project is pre-launch and the user is the sole te
 - llama-cpp-python's `Llama.create_chat_completion` is the highest-level API and supports `grammar=` natively. Don't drop to `Llama()` raw token loops.
 - `huggingface_hub.hf_hub_download` accepts a `cache_dir` plus `local_dir` — use `local_dir` to write directly to our target location (avoids HF's symlink dance) and `local_dir_use_symlinks=False`.
 - Model file SHA-256 should be pinned in code, not in spec; the spec just lists "pinned to whatever was current at implementation time."
-- In dev mode, `app.getPath('userData')` returns `/Users/<user>/Library/Application Support/Electron` — *not* the project directory. Verify this works for the test fixture path or override via env var.
+- In dev mode, `app.getPath('userData')` returns `/Users/<user>/Library/Application Support/Electron` — _not_ the project directory. Verify this works for the test fixture path or override via env var.
 - The sidecar's RPC notification mechanism (for download progress) needs to be re-checked — if the M4 sidecar didn't expose a notifications channel, this M11 work adds it. If notifications can't be added cleanly, fall back to polling: main calls `llm_download_status` every 500ms while a download is active.
 - The M10 chunked rerank prompt restated the schema explicitly (per the post-merge fix). Keep both `highlights` and `highlights_rerank` GBNFs identical for now; the difference is purely in the system prompt copy, not in the JSON shape.
 - README needs updating: drop OpenRouter section entirely, add a note about local model + first-call download.

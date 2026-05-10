@@ -49,6 +49,7 @@ README.md                                     # MODIFY: rename M10→M11, add M1
 ### Task 1: Shared `Highlight` schema rewrite
 
 **Files:**
+
 - Modify: `src/shared/highlight.ts`
 
 This task **intentionally** breaks downstream typechecks (`HighlightService`, `RenderService`, test fixtures). Subsequent tasks fix each consumer.
@@ -123,6 +124,7 @@ git commit -m "feat(m10): rewrite Highlight schema with segments[] (replaces fla
 ### Task 2: `ChunkPlanner` rewrite for segments (TDD)
 
 **Files:**
+
 - Modify: `src/main/services/ChunkPlanner.ts`
 - Modify: `src/main/services/ChunkPlanner.test.ts`
 
@@ -303,6 +305,7 @@ git commit -m "feat(m10): rewrite ChunkPlanner for segments instead of words"
 ### Task 3: `HighlightService` rewrite (TDD)
 
 **Files:**
+
 - Modify: `src/main/services/HighlightService.ts`
 - Modify: `src/main/services/HighlightService.test.ts`
 
@@ -311,9 +314,9 @@ Service now sends `segments` (numbered by global index) and gets back `segment_i
 - [ ] **Step 1: Replace `src/main/services/HighlightService.test.ts` ENTIRELY with**
 
 ```ts
+import type { Segment, Transcript } from '@shared/transcript';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Transcript, Segment } from '@shared/transcript';
 import { HighlightService } from './HighlightService';
 
 function fakeSegments(count: number, durationEach = 5): Segment[] {
@@ -514,11 +517,10 @@ yarn test src/main/services/HighlightService.test.ts
 - [ ] **Step 3: Replace `src/main/services/HighlightService.ts` ENTIRELY with**
 
 ```ts
-import { z } from 'zod';
-
 import { type ExtractProgress } from '@shared/extract';
-import { type Highlight, type HighlightSet, HighlightSchema } from '@shared/highlight';
+import { type Highlight, HighlightSchema, type HighlightSet } from '@shared/highlight';
 import { type Segment, type Transcript } from '@shared/transcript';
+import { z } from 'zod';
 
 import { type ChunkRange, planChunks } from './ChunkPlanner';
 
@@ -698,8 +700,7 @@ export class HighlightService {
 
 function formatChunkPrompt(chunk: ChunkRange): string {
   const lines = chunk.segments.map(
-    (s: Segment, localIdx: number) =>
-      `[${localIdx}] (${s.start.toFixed(2)}-${s.end.toFixed(2)}) ${s.text}`,
+    (s: Segment, localIdx: number) => `[${localIdx}] (${s.start.toFixed(2)}-${s.end.toFixed(2)}) ${s.text}`,
   );
   return `청크 시작 글로벌 인덱스: ${chunk.firstIndex}\n청크 시간 범위: ${chunk.startSec.toFixed(2)}s - ${chunk.endSec.toFixed(2)}s\n\n세그먼트 목록 ([로컬 인덱스] (start-end) text):\n${lines.join('\n')}`;
 }
@@ -724,6 +725,7 @@ git commit -m "feat(m10): rewrite HighlightService for segment-indices LLM contr
 ### Task 4: `MontageHelpers` pure helpers (TDD)
 
 **Files:**
+
 - Create: `src/main/services/MontageHelpers.ts`
 - Create: `src/main/services/MontageHelpers.test.ts`
 
@@ -734,11 +736,10 @@ Two pure functions: `rebaseTrackingFrames` (concatenates per-segment tracking re
 Create `src/main/services/MontageHelpers.test.ts`:
 
 ```ts
-import { describe, expect, it } from 'vitest';
-
 import type { HighlightSegment } from '@shared/highlight';
 import type { TrackFrame, TrackResult } from '@shared/track';
 import type { Word } from '@shared/transcript';
+import { describe, expect, it } from 'vitest';
 
 import { rebaseTrackingFrames, rebaseTranscriptWords } from './MontageHelpers';
 
@@ -768,10 +769,10 @@ describe('rebaseTrackingFrames', () => {
     ];
     const frames = rebaseTrackingFrames(segments, perSeg);
     expect(frames).toEqual([
-      { t: 0, cx: 100, cy: 100 },        // segment 0: t=10 → 0
-      { t: 2, cx: 200, cy: 200 },        // segment 0: t=12 → 2
-      { t: 3, cx: 300, cy: 300 },        // segment 1: t=100 → 3 (cumulative)
-      { t: 4, cx: 400, cy: 400 },        // segment 1: t=101 → 4
+      { t: 0, cx: 100, cy: 100 }, // segment 0: t=10 → 0
+      { t: 2, cx: 200, cy: 200 }, // segment 0: t=12 → 2
+      { t: 3, cx: 300, cy: 300 }, // segment 1: t=100 → 3 (cumulative)
+      { t: 4, cx: 400, cy: 400 }, // segment 1: t=101 → 4
     ]);
   });
 
@@ -789,9 +790,7 @@ describe('rebaseTrackingFrames', () => {
 
   it('handles a single segment as a degenerate case', () => {
     const segments: HighlightSegment[] = [{ start_sec: 5, end_sec: 8 }];
-    const perSeg: TrackResult[] = [
-      { sourceWidth: 1920, sourceHeight: 1080, frames: [{ t: 5, cx: 50, cy: 50 }] },
-    ];
+    const perSeg: TrackResult[] = [{ sourceWidth: 1920, sourceHeight: 1080, frames: [{ t: 5, cx: 50, cy: 50 }] }];
     expect(rebaseTrackingFrames(segments, perSeg)).toEqual([{ t: 0, cx: 50, cy: 50 }]);
   });
 });
@@ -807,10 +806,10 @@ describe('rebaseTranscriptWords', () => {
       { start_sec: 100, end_sec: 102 }, // duration 2
     ];
     const sourceWords: Word[] = [
-      w('skip', 0, 1),         // outside both
-      w('hello', 10.5, 11.0),  // segment 0 → t=0.5..1.0
-      w('world', 12.0, 12.5),  // segment 0 → t=2.0..2.5
-      w('skip', 50, 51),       // outside
+      w('skip', 0, 1), // outside both
+      w('hello', 10.5, 11.0), // segment 0 → t=0.5..1.0
+      w('world', 12.0, 12.5), // segment 0 → t=2.0..2.5
+      w('skip', 50, 51), // outside
       w('next', 100.0, 101.5), // segment 1 → t=3.0..4.5
     ];
     const rebased = rebaseTranscriptWords(segments, sourceWords);
@@ -825,7 +824,7 @@ describe('rebaseTranscriptWords', () => {
     const segments: HighlightSegment[] = [{ start_sec: 10, end_sec: 13 }];
     const sourceWords: Word[] = [
       w('straddleStart', 9.5, 10.5), // visible portion 10.0..10.5 → t=0..0.5
-      w('straddleEnd', 12.5, 13.5),   // visible portion 12.5..13.0 → t=2.5..3.0
+      w('straddleEnd', 12.5, 13.5), // visible portion 12.5..13.0 → t=2.5..3.0
     ];
     const rebased = rebaseTranscriptWords(segments, sourceWords);
     expect(rebased).toEqual([
@@ -860,10 +859,7 @@ import type { Word } from '@shared/transcript';
  * montage-relative timestamps. Returns empty array if ANY segment has zero
  * frames — caller (RenderService) falls back to center crop in that case.
  */
-export function rebaseTrackingFrames(
-  segments: HighlightSegment[],
-  perSegmentResults: TrackResult[],
-): TrackFrame[] {
+export function rebaseTrackingFrames(segments: HighlightSegment[], perSegmentResults: TrackResult[]): TrackFrame[] {
   if (perSegmentResults.some((r) => r.frames.length === 0)) return [];
   const out: TrackFrame[] = [];
   let cumulativeMontageTime = 0;
@@ -887,16 +883,11 @@ export function rebaseTrackingFrames(
  * segment, then rebase their timestamps to montage-relative time. Words
  * straddling a segment boundary are clamped to the visible portion.
  */
-export function rebaseTranscriptWords(
-  segments: HighlightSegment[],
-  sourceWords: Word[],
-): Word[] {
+export function rebaseTranscriptWords(segments: HighlightSegment[], sourceWords: Word[]): Word[] {
   const out: Word[] = [];
   let cumulativeMontageTime = 0;
   for (const seg of segments) {
-    const segWords = sourceWords.filter(
-      (w) => w.start < seg.end_sec && w.end > seg.start_sec,
-    );
+    const segWords = sourceWords.filter((w) => w.start < seg.end_sec && w.end > seg.start_sec);
     for (const w of segWords) {
       const clampedStart = Math.max(w.start, seg.start_sec);
       const clampedEnd = Math.min(w.end, seg.end_sec);
@@ -931,6 +922,7 @@ git commit -m "feat(m10): add MontageHelpers (rebaseTrackingFrames + rebaseTrans
 ### Task 5: `RenderService` rewrite for segment-based montages (TDD)
 
 **Files:**
+
 - Modify: `src/main/services/RenderService.ts`
 - Modify: `src/main/services/RenderService.test.ts`
 
@@ -949,10 +941,7 @@ function fakeHighlight(i: number, start: number, end: number) {
   };
 }
 
-function fakeMultiSegHighlight(
-  i: number,
-  ranges: { start: number; end: number }[],
-) {
+function fakeMultiSegHighlight(i: number, ranges: { start: number; end: number }[]) {
   return {
     segments: ranges.map((r) => ({ start_sec: r.start, end_sec: r.end })),
     title: `H${i}`,
@@ -964,6 +953,7 @@ function fakeMultiSegHighlight(
 Then update existing test assertions that read `args[args.indexOf('-vf') + 1]`:
 
 The center-crop filter chain becomes:
+
 - Old: `crop=ih*9/16:ih,scale=1080:1920`
 - New: `select='between(t,X,Y)+...',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920`
 
@@ -1010,9 +1000,7 @@ it('builds ffmpeg args with select-filter cuts, the 9:16 crop+scale filter, libx
     "select='between(t,5,35)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
   );
   expect(args).toContain('-af');
-  expect(args[args.indexOf('-af') + 1]).toBe(
-    "aselect='between(t,5,35)',asetpts=N/SR/TB",
-  );
+  expect(args[args.indexOf('-af') + 1]).toBe("aselect='between(t,5,35)',asetpts=N/SR/TB");
   expect(args).toContain('libx264');
   expect(args).toContain('aac');
   expect(args[args.length - 1]).toBe('/tmp/out/short_1.mp4');
@@ -1026,150 +1014,177 @@ For all OTHER existing tests in `describe('RenderService')` and `describe('Rende
 In the `describe('RenderService with subtitles')` block, after the existing last test, append:
 
 ```ts
-  it('multi-segment highlight builds select filter with multiple between() ranges', async () => {
-    const writeFile = vi.fn(async (_p: string, _c: string, _e?: string) => undefined);
-    const fs = { writeFile };
-    const service = new RenderService(runner as never, { fs: fs as never });
-    const h = fakeRunHandle();
-    run.mockReturnValue(h);
+it('multi-segment highlight builds select filter with multiple between() ranges', async () => {
+  const writeFile = vi.fn(async (_p: string, _c: string, _e?: string) => undefined);
+  const fs = { writeFile };
+  const service = new RenderService(runner as never, { fs: fs as never });
+  const h = fakeRunHandle();
+  run.mockReturnValue(h);
 
-    const promise = service.render({
-      sourcePath: '/tmp/in.mp4',
-      outputDir: '/tmp/out',
-      highlights: [fakeMultiSegHighlight(1, [{ start: 5, end: 8 }, { start: 12, end: 15 }, { start: 30, end: 33 }])],
-    });
-    h._resolve();
-    const result = await promise;
-
-    const args: string[] = run.mock.calls[0]![0].args;
-    expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,5,8)+between(t,12,15)+between(t,30,33)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
-    );
-    expect(args[args.indexOf('-af') + 1]).toBe(
-      "aselect='between(t,5,8)+between(t,12,15)+between(t,30,33)',asetpts=N/SR/TB",
-    );
-    // durationSec = sum of segment durations (3+3+3 = 9)
-    expect(run.mock.calls[0]![0].durationSec).toBe(9);
-    // RenderClipResult.startSec/endSec derived from first/last segments
-    expect(result.results[0]!.startSec).toBe(5);
-    expect(result.results[0]!.endSec).toBe(33);
+  const promise = service.render({
+    sourcePath: '/tmp/in.mp4',
+    outputDir: '/tmp/out',
+    highlights: [
+      fakeMultiSegHighlight(1, [
+        { start: 5, end: 8 },
+        { start: 12, end: 15 },
+        { start: 30, end: 33 },
+      ]),
+    ],
   });
+  h._resolve();
+  const result = await promise;
 
-  it('multi-segment with tracker rebases per-segment frames into one sendcmd file', async () => {
-    const writeFile = vi.fn(async (_p: string, _c: string, _e?: string) => undefined);
-    const fs = { writeFile };
-    // Tracker returns one frame per segment, in source-time
-    const trackerCalls: { startSec: number; endSec: number }[] = [];
-    const tracker = {
-      track: vi.fn(async (_path: string, opts: { startSec: number; endSec: number }) => {
-        trackerCalls.push({ startSec: opts.startSec, endSec: opts.endSec });
-        return {
-          sourceWidth: 1920,
-          sourceHeight: 1080,
-          frames: [{ t: opts.startSec + 1, cx: 500, cy: 500 }],
-        };
-      }),
-    };
-    const service = new RenderService(runner as never, { tracker: tracker as never, fs: fs as never });
-    const h = fakeRunHandle();
-    run.mockReturnValue(h);
+  const args: string[] = run.mock.calls[0]![0].args;
+  expect(args[args.indexOf('-vf') + 1]).toBe(
+    "select='between(t,5,8)+between(t,12,15)+between(t,30,33)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+  );
+  expect(args[args.indexOf('-af') + 1]).toBe(
+    "aselect='between(t,5,8)+between(t,12,15)+between(t,30,33)',asetpts=N/SR/TB",
+  );
+  // durationSec = sum of segment durations (3+3+3 = 9)
+  expect(run.mock.calls[0]![0].durationSec).toBe(9);
+  // RenderClipResult.startSec/endSec derived from first/last segments
+  expect(result.results[0]!.startSec).toBe(5);
+  expect(result.results[0]!.endSec).toBe(33);
+});
 
-    const promise = service.render({
-      sourcePath: '/tmp/in.mp4',
-      outputDir: '/tmp/out',
-      highlights: [fakeMultiSegHighlight(1, [{ start: 10, end: 13 }, { start: 100, end: 102 }])],
-    });
-    h._resolve();
-    await promise;
+it('multi-segment with tracker rebases per-segment frames into one sendcmd file', async () => {
+  const writeFile = vi.fn(async (_p: string, _c: string, _e?: string) => undefined);
+  const fs = { writeFile };
+  // Tracker returns one frame per segment, in source-time
+  const trackerCalls: { startSec: number; endSec: number }[] = [];
+  const tracker = {
+    track: vi.fn(async (_path: string, opts: { startSec: number; endSec: number }) => {
+      trackerCalls.push({ startSec: opts.startSec, endSec: opts.endSec });
+      return {
+        sourceWidth: 1920,
+        sourceHeight: 1080,
+        frames: [{ t: opts.startSec + 1, cx: 500, cy: 500 }],
+      };
+    }),
+  };
+  const service = new RenderService(runner as never, { tracker: tracker as never, fs: fs as never });
+  const h = fakeRunHandle();
+  run.mockReturnValue(h);
 
-    // Tracker called once per segment
-    expect(trackerCalls).toEqual([
-      { startSec: 10, endSec: 13 },
-      { startSec: 100, endSec: 102 },
-    ]);
-    // .cmd file contains rebased times: seg 0 → t=1 (10→11 rebased to 1), seg 1 → t=4 (100→101 rebased to 3+1=4)
-    const cmdWrite = writeFile.mock.calls.find((c) => String(c[0]).endsWith('.cmd'))!;
-    const cmdContent = cmdWrite[1] as string;
-    expect(cmdContent).toContain('1 crop@c x');
-    expect(cmdContent).toContain('4 crop@c x');
+  const promise = service.render({
+    sourcePath: '/tmp/in.mp4',
+    outputDir: '/tmp/out',
+    highlights: [
+      fakeMultiSegHighlight(1, [
+        { start: 10, end: 13 },
+        { start: 100, end: 102 },
+      ]),
+    ],
   });
+  h._resolve();
+  await promise;
 
-  it('multi-segment fallback to center crop when one segment has zero tracked frames', async () => {
-    const writeFile = vi.fn(async (_p: string, _c: string, _e?: string) => undefined);
-    const fs = { writeFile };
-    let call = 0;
-    const tracker = {
-      track: vi.fn(async () => {
-        call += 1;
-        return {
-          sourceWidth: 1920,
-          sourceHeight: 1080,
-          frames: call === 1 ? [{ t: 11, cx: 500, cy: 500 }] : [],
-        };
-      }),
-    };
-    const service = new RenderService(runner as never, { tracker: tracker as never, fs: fs as never });
-    const h = fakeRunHandle();
-    run.mockReturnValue(h);
+  // Tracker called once per segment
+  expect(trackerCalls).toEqual([
+    { startSec: 10, endSec: 13 },
+    { startSec: 100, endSec: 102 },
+  ]);
+  // .cmd file contains rebased times: seg 0 → t=1 (10→11 rebased to 1), seg 1 → t=4 (100→101 rebased to 3+1=4)
+  const cmdWrite = writeFile.mock.calls.find((c) => String(c[0]).endsWith('.cmd'))!;
+  const cmdContent = cmdWrite[1] as string;
+  expect(cmdContent).toContain('1 crop@c x');
+  expect(cmdContent).toContain('4 crop@c x');
+});
 
-    const promise = service.render({
-      sourcePath: '/tmp/in.mp4',
-      outputDir: '/tmp/out',
-      highlights: [fakeMultiSegHighlight(1, [{ start: 10, end: 13 }, { start: 100, end: 102 }])],
-    });
-    h._resolve();
-    const result = await promise;
+it('multi-segment fallback to center crop when one segment has zero tracked frames', async () => {
+  const writeFile = vi.fn(async (_p: string, _c: string, _e?: string) => undefined);
+  const fs = { writeFile };
+  let call = 0;
+  const tracker = {
+    track: vi.fn(async () => {
+      call += 1;
+      return {
+        sourceWidth: 1920,
+        sourceHeight: 1080,
+        frames: call === 1 ? [{ t: 11, cx: 500, cy: 500 }] : [],
+      };
+    }),
+  };
+  const service = new RenderService(runner as never, { tracker: tracker as never, fs: fs as never });
+  const h = fakeRunHandle();
+  run.mockReturnValue(h);
 
-    // Center-crop fallback (no sendcmd in args)
-    const args: string[] = run.mock.calls[0]![0].args;
-    expect(args[args.indexOf('-vf') + 1]).toContain('crop=ih*9/16:ih');
-    expect(args[args.indexOf('-vf') + 1]).not.toContain('sendcmd');
-    expect(result.results[0]!.tracking).toBeNull();
+  const promise = service.render({
+    sourcePath: '/tmp/in.mp4',
+    outputDir: '/tmp/out',
+    highlights: [
+      fakeMultiSegHighlight(1, [
+        { start: 10, end: 13 },
+        { start: 100, end: 102 },
+      ]),
+    ],
   });
+  h._resolve();
+  const result = await promise;
 
-  it('multi-segment with subtitles rebases words across the montage timeline', async () => {
-    const writeFile = vi.fn(async (_p: string, _c: string, _e?: string) => undefined);
-    const fs = { writeFile };
-    const service = new RenderService(runner as never, { fs: fs as never });
-    const h = fakeRunHandle();
-    run.mockReturnValue(h);
+  // Center-crop fallback (no sendcmd in args)
+  const args: string[] = run.mock.calls[0]![0].args;
+  expect(args[args.indexOf('-vf') + 1]).toContain('crop=ih*9/16:ih');
+  expect(args[args.indexOf('-vf') + 1]).not.toContain('sendcmd');
+  expect(result.results[0]!.tracking).toBeNull();
+});
 
-    const promise = service.render({
-      sourcePath: '/tmp/in.mp4',
-      outputDir: '/tmp/out',
-      highlights: [fakeMultiSegHighlight(1, [{ start: 10, end: 13 }, { start: 100, end: 102 }])],
-      transcriptWords: [
-        { text: 'hello', start: 11, end: 11.5 },   // seg 0 → t=1.0..1.5
-        { text: 'world', start: 100.5, end: 101 }, // seg 1 → t=3.5..4
-      ],
-      subtitleOptions: SUBTITLE_OPTS,
-    });
-    h._resolve();
-    await promise;
+it('multi-segment with subtitles rebases words across the montage timeline', async () => {
+  const writeFile = vi.fn(async (_p: string, _c: string, _e?: string) => undefined);
+  const fs = { writeFile };
+  const service = new RenderService(runner as never, { fs: fs as never });
+  const h = fakeRunHandle();
+  run.mockReturnValue(h);
 
-    const assWrite = writeFile.mock.calls.find((c) => String(c[0]).endsWith('.ass'))!;
-    const assContent = assWrite[1] as string;
-    // Cue dialogues with montage-relative times
-    expect(assContent).toContain('0:00:01.00,0:00:01.50');  // 'hello' at t=1.0..1.5
-    expect(assContent).toContain('0:00:03.50,0:00:04.00');  // 'world' at t=3.5..4.0
+  const promise = service.render({
+    sourcePath: '/tmp/in.mp4',
+    outputDir: '/tmp/out',
+    highlights: [
+      fakeMultiSegHighlight(1, [
+        { start: 10, end: 13 },
+        { start: 100, end: 102 },
+      ]),
+    ],
+    transcriptWords: [
+      { text: 'hello', start: 11, end: 11.5 }, // seg 0 → t=1.0..1.5
+      { text: 'world', start: 100.5, end: 101 }, // seg 1 → t=3.5..4
+    ],
+    subtitleOptions: SUBTITLE_OPTS,
   });
+  h._resolve();
+  await promise;
 
-  it('multi-segment durationSec passed to runner is the sum of segment durations', async () => {
-    const service = new RenderService(runner as never);
-    const h = fakeRunHandle();
-    run.mockReturnValue(h);
+  const assWrite = writeFile.mock.calls.find((c) => String(c[0]).endsWith('.ass'))!;
+  const assContent = assWrite[1] as string;
+  // Cue dialogues with montage-relative times
+  expect(assContent).toContain('0:00:01.00,0:00:01.50'); // 'hello' at t=1.0..1.5
+  expect(assContent).toContain('0:00:03.50,0:00:04.00'); // 'world' at t=3.5..4.0
+});
 
-    const promise = service.render({
-      sourcePath: '/tmp/in.mp4',
-      outputDir: '/tmp/out',
-      highlights: [fakeMultiSegHighlight(1, [{ start: 0, end: 5 }, { start: 10, end: 15 }, { start: 20, end: 25 }])],
-    });
-    h._resolve();
-    await promise;
+it('multi-segment durationSec passed to runner is the sum of segment durations', async () => {
+  const service = new RenderService(runner as never);
+  const h = fakeRunHandle();
+  run.mockReturnValue(h);
 
-    // 3 segments × 5s = 15s
-    expect(run.mock.calls[0]![0].durationSec).toBe(15);
+  const promise = service.render({
+    sourcePath: '/tmp/in.mp4',
+    outputDir: '/tmp/out',
+    highlights: [
+      fakeMultiSegHighlight(1, [
+        { start: 0, end: 5 },
+        { start: 10, end: 15 },
+        { start: 20, end: 25 },
+      ]),
+    ],
   });
+  h._resolve();
+  await promise;
+
+  // 3 segments × 5s = 15s
+  expect(run.mock.calls[0]![0].durationSec).toBe(15);
+});
 ```
 
 - [ ] **Step 3: Run tests — should fail (15 existing rewrites + 5 new)**
@@ -1181,17 +1196,16 @@ yarn test src/main/services/RenderService.test.ts
 - [ ] **Step 4: Replace `src/main/services/RenderService.ts` ENTIRELY with**
 
 ```ts
-import { promises as fsPromises } from 'node:fs';
-import { join } from 'node:path';
-
 import type { Highlight, HighlightSegment } from '@shared/highlight';
 import type { RenderClipResult, RenderProgress, RenderResult } from '@shared/render';
 import type { TrackResult } from '@shared/track';
 import type { Word } from '@shared/transcript';
+import { promises as fsPromises } from 'node:fs';
+import { join } from 'node:path';
 
 import { rebaseTrackingFrames, rebaseTranscriptWords } from './MontageHelpers';
 import { buildSendcmd } from './SendcmdGenerator';
-import { buildAssFile, type SubtitleStyle } from './SubtitleGenerator';
+import { type SubtitleStyle, buildAssFile } from './SubtitleGenerator';
 
 interface RunnerLike {
   run(opts: { args: readonly string[]; durationSec: number }): {
@@ -1202,10 +1216,7 @@ interface RunnerLike {
 }
 
 interface TrackerLike {
-  track(
-    videoPath: string,
-    opts: { startSec: number; endSec: number; fpsSample?: number },
-  ): Promise<TrackResult>;
+  track(videoPath: string, opts: { startSec: number; endSec: number; fpsSample?: number }): Promise<TrackResult>;
 }
 
 type FsLike = Pick<typeof fsPromises, 'writeFile'>;
@@ -1522,6 +1533,7 @@ git commit -m "feat(m10): rewrite RenderService for segment-based montage render
 ### Task 6: Wire main.ts (and adjacent test stubs)
 
 **Files:**
+
 - Modify: `src/main/services/HistoryService.ts` (small fixture-shape adjustment)
 - Modify: `src/main/services/HistoryService.test.ts` (test fixture shape)
 - Modify: `tests/renderer/NewJob.test.tsx` (mock highlight shape)
@@ -1599,6 +1611,7 @@ git commit -m "feat(m10): update test fixtures + HistoryService for new Highligh
 ### Task 7: `HighlightCard` UI tweak
 
 **Files:**
+
 - Modify: `src/renderer/components/newjob/HighlightCard.tsx`
 
 Show segment count + total duration when `segments.length > 1`. Single-range highlights keep the existing `start – end` form.
@@ -1612,22 +1625,23 @@ It currently renders something like `#${i+1} ${h.title} (formatTime(h.start_sec)
 Replace the existing per-highlight rendering with:
 
 ```tsx
-{props.highlightSet.highlights.map((h: Highlight, i: number) => {
-  const totalSec = h.segments.reduce((acc, s) => acc + (s.end_sec - s.start_sec), 0);
-  const isMulti = h.segments.length > 1;
-  const rangeLabel = isMulti
-    ? `${h.segments.length}개 세그먼트 · ${formatTime(totalSec)} 총길이`
-    : `${formatTime(h.segments[0]!.start_sec)} – ${formatTime(h.segments[0]!.end_sec)}`;
-  return (
-    <li key={i} className="bg-surface p-md rounded-lg">
-      <p className="text-body-md text-ink font-semibold">
-        #{i + 1} {h.title}{' '}
-        <span className="text-body-sm text-slate font-normal">({rangeLabel})</span>
-      </p>
-      <p className="text-body-sm text-slate mt-xs">{h.hook}</p>
-    </li>
-  );
-})}
+{
+  props.highlightSet.highlights.map((h: Highlight, i: number) => {
+    const totalSec = h.segments.reduce((acc, s) => acc + (s.end_sec - s.start_sec), 0);
+    const isMulti = h.segments.length > 1;
+    const rangeLabel = isMulti
+      ? `${h.segments.length}개 세그먼트 · ${formatTime(totalSec)} 총길이`
+      : `${formatTime(h.segments[0]!.start_sec)} – ${formatTime(h.segments[0]!.end_sec)}`;
+    return (
+      <li key={i} className="bg-surface p-md rounded-lg">
+        <p className="text-body-md text-ink font-semibold">
+          #{i + 1} {h.title} <span className="text-body-sm text-slate font-normal">({rangeLabel})</span>
+        </p>
+        <p className="text-body-sm text-slate mt-xs">{h.hook}</p>
+      </li>
+    );
+  });
+}
 ```
 
 (The existing `formatTime` helper at the top of the file works for both single-range and total-duration display.)
@@ -1657,6 +1671,7 @@ git commit -m "feat(m10): show segment count + total duration for multi-segment 
 ### Task 8: README update + DoD verification + finalize branch
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Run all DoD checks**
@@ -1676,6 +1691,7 @@ yarn dev
 ```
 
 In the app:
+
 1. Run a fresh pipeline: preview → 다운로드 → STT 시작 → 하이라이트 추출.
 2. Inspect the new highlights — multi-segment highlights should show "N개 세그먼트 · MM:SS 총길이" in the card; single-segment fall back to the existing `0:00 – 0:30` form.
 3. Click 숏츠 만들기. Verify each clip renders in one ffmpeg pass.

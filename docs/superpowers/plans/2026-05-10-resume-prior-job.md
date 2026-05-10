@@ -58,6 +58,7 @@ tests/renderer/
 ### Task 1: `ResumeSnapshot` shared type + ResumeService skeleton
 
 **Files:**
+
 - Create: `src/shared/resume.ts`
 - Create: `src/main/services/ResumeService.ts`
 - Create: `src/main/services/ResumeService.test.ts`
@@ -183,6 +184,7 @@ git commit -m "feat: ResumeSnapshot type + ResumeService skeleton"
 ### Task 2: `ResumeService.detect()` — scan downloads dir, match videoId
 
 **Files:**
+
 - Modify: `src/main/services/ResumeService.ts`
 - Modify: `src/main/services/ResumeService.test.ts`
 
@@ -196,9 +198,9 @@ Append:
 
 ```ts
 import { promises as fsPromises } from 'node:fs';
-import { join } from 'node:path';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
 
 async function withTempDl(): Promise<{ dl: string; cleanup: () => Promise<void> }> {
   const dl = await mkdtemp(join(tmpdir(), 'resume-test-'));
@@ -221,10 +223,7 @@ describe('ResumeService.detect (real fs)', () => {
       const sourcePath = join(dl, 'video.webm');
       await writeFile(sourcePath, 'fake');
       await writeFile(`${sourcePath}.meta.json`, JSON.stringify(baseMeta));
-      const svc = new ResumeService(
-        { get: () => ({ paths: { downloads: dl, outputs: '/out' } }) },
-        fsPromises,
-      );
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
       const snap = await svc.detect('abc123');
       expect(snap).not.toBeNull();
       expect(snap!.sourcePath).toBe(sourcePath);
@@ -243,10 +242,7 @@ describe('ResumeService.detect (real fs)', () => {
     try {
       await writeFile(join(dl, 'video.webm'), 'fake');
       await writeFile(join(dl, 'video.webm.meta.json'), JSON.stringify({ ...baseMeta, id: 'other' }));
-      const svc = new ResumeService(
-        { get: () => ({ paths: { downloads: dl, outputs: '/out' } }) },
-        fsPromises,
-      );
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
       expect(await svc.detect('abc123')).toBeNull();
     } finally {
       await cleanup();
@@ -258,10 +254,7 @@ describe('ResumeService.detect (real fs)', () => {
     try {
       // meta.json exists but the .webm beside it does not
       await writeFile(join(dl, 'gone.webm.meta.json'), JSON.stringify(baseMeta));
-      const svc = new ResumeService(
-        { get: () => ({ paths: { downloads: dl, outputs: '/out' } }) },
-        fsPromises,
-      );
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
       expect(await svc.detect('abc123')).toBeNull();
     } finally {
       await cleanup();
@@ -284,10 +277,7 @@ describe('ResumeService.detect (real fs)', () => {
       const sourcePath = join(dl, 'b.webm');
       await writeFile(sourcePath, 'fake');
       await writeFile(`${sourcePath}.meta.json`, JSON.stringify(baseMeta));
-      const svc = new ResumeService(
-        { get: () => ({ paths: { downloads: dl, outputs: '/out' } }) },
-        fsPromises,
-      );
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
       const snap = await svc.detect('abc123');
       expect(snap?.sourcePath).toBe(sourcePath);
     } finally {
@@ -306,10 +296,7 @@ describe('ResumeService.detect (real fs)', () => {
       // Make `new`'s meta.json mtime newer
       await new Promise((r) => setTimeout(r, 10));
       await writeFile(`${newPath}.meta.json`, JSON.stringify(baseMeta));
-      const svc = new ResumeService(
-        { get: () => ({ paths: { downloads: dl, outputs: '/out' } }) },
-        fsPromises,
-      );
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
       const snap = await svc.detect('abc123');
       expect(snap?.sourcePath).toBe(newPath);
     } finally {
@@ -330,10 +317,9 @@ yarn test src/main/services/ResumeService.test.ts
 Replace the entire file with:
 
 ```ts
-import { extname, join } from 'node:path';
-
-import { type VideoMeta, VideoMetaSchema } from '@shared/youtube';
 import type { ResumeSnapshot } from '@shared/resume';
+import { type VideoMeta, VideoMetaSchema } from '@shared/youtube';
+import { extname, join } from 'node:path';
 
 interface SettingsLike {
   get(): { paths: { downloads: string; outputs: string } };
@@ -456,10 +442,11 @@ git commit -m "feat: ResumeService.detect — scan downloads, match videoId, ret
 ### Task 3: `ResumeService.hydrate()` + sibling artifact reading + render reconstruction
 
 **Files:**
+
 - Modify: `src/main/services/ResumeService.ts`
 - Modify: `src/main/services/ResumeService.test.ts`
 
-Adds `hydrate(sourcePath)` and refactors detect's snapshot construction to share a `buildSnapshot()` helper that reads transcript.json / highlights.json / outputs/<stem>/short_*.mp4 if present.
+Adds `hydrate(sourcePath)` and refactors detect's snapshot construction to share a `buildSnapshot()` helper that reads transcript.json / highlights.json / outputs/<stem>/short\_\*.mp4 if present.
 
 - [ ] **Step 1: Append hydrate tests to `src/main/services/ResumeService.test.ts`**
 
@@ -468,10 +455,7 @@ describe('ResumeService.hydrate (real fs)', () => {
   it('returns null when meta.json does not exist for sourcePath', async () => {
     const { dl, cleanup } = await withTempDl();
     try {
-      const svc = new ResumeService(
-        { get: () => ({ paths: { downloads: dl, outputs: '/out' } }) },
-        fsPromises,
-      );
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
       expect(await svc.hydrate(join(dl, 'no-meta.webm'))).toBeNull();
     } finally {
       await cleanup();
@@ -484,10 +468,7 @@ describe('ResumeService.hydrate (real fs)', () => {
       const sourcePath = join(dl, 'a.webm');
       await writeFile(sourcePath, 'fake');
       await writeFile(`${sourcePath}.meta.json`, JSON.stringify(baseMeta));
-      const svc = new ResumeService(
-        { get: () => ({ paths: { downloads: dl, outputs: '/out' } }) },
-        fsPromises,
-      );
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
       const snap = await svc.hydrate(sourcePath);
       expect(snap?.download.outputPath).toBe(sourcePath);
       expect(snap?.transcript).toBeUndefined();
@@ -513,10 +494,7 @@ describe('ResumeService.hydrate (real fs)', () => {
           words: [{ start: 0, end: 1, text: 'hi' }],
         }),
       );
-      const svc = new ResumeService(
-        { get: () => ({ paths: { downloads: dl, outputs: '/out' } }) },
-        fsPromises,
-      );
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
       const snap = await svc.hydrate(sourcePath);
       expect(snap?.transcript?.path).toBe(`${sourcePath}.transcript.json`);
       expect(snap?.transcript?.data.segments).toHaveLength(1);
@@ -532,10 +510,7 @@ describe('ResumeService.hydrate (real fs)', () => {
       await writeFile(sourcePath, 'fake');
       await writeFile(`${sourcePath}.meta.json`, JSON.stringify(baseMeta));
       await writeFile(`${sourcePath}.transcript.json`, 'not-json');
-      const svc = new ResumeService(
-        { get: () => ({ paths: { downloads: dl, outputs: '/out' } }) },
-        fsPromises,
-      );
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
       const snap = await svc.hydrate(sourcePath);
       expect(snap?.transcript).toBeUndefined();
     } finally {
@@ -555,15 +530,10 @@ describe('ResumeService.hydrate (real fs)', () => {
           generatedAt: '2026-05-10T00:00:00Z',
           model: 'gemma-3-4b',
           audioPath: sourcePath,
-          highlights: [
-            { segments: [{ start_sec: 0, end_sec: 5 }], title: 'T', hook: 'h' },
-          ],
+          highlights: [{ segments: [{ start_sec: 0, end_sec: 5 }], title: 'T', hook: 'h' }],
         }),
       );
-      const svc = new ResumeService(
-        { get: () => ({ paths: { downloads: dl, outputs: '/out' } }) },
-        fsPromises,
-      );
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
       const snap = await svc.hydrate(sourcePath);
       expect(snap?.highlights?.data.highlights).toHaveLength(1);
     } finally {
@@ -594,10 +564,7 @@ describe('ResumeService.hydrate (real fs)', () => {
       await fsPromises.mkdir(stemOut, { recursive: true });
       await writeFile(join(stemOut, 'short_1.mp4'), 'mp4-1');
       await writeFile(join(stemOut, 'short_2.mp4'), 'mp4-2');
-      const svc = new ResumeService(
-        { get: () => ({ paths: { downloads: dl, outputs: out } }) },
-        fsPromises,
-      );
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: out } }) }, fsPromises);
       const snap = await svc.hydrate(sourcePath);
       expect(snap?.render).toBeDefined();
       expect(snap!.render!.result.results).toHaveLength(2);
@@ -620,10 +587,7 @@ describe('ResumeService.hydrate (real fs)', () => {
       await writeFile(`${sourcePath}.meta.json`, JSON.stringify(baseMeta));
       // outputs/<stem>/ exists but is empty
       await fsPromises.mkdir(join(out, 'video'), { recursive: true });
-      const svc = new ResumeService(
-        { get: () => ({ paths: { downloads: dl, outputs: out } }) },
-        fsPromises,
-      );
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: out } }) }, fsPromises);
       const snap = await svc.hydrate(sourcePath);
       expect(snap?.render).toBeUndefined();
     } finally {
@@ -643,13 +607,12 @@ yarn test src/main/services/ResumeService.test.ts
 - [ ] **Step 3: Replace `src/main/services/ResumeService.ts` ENTIRELY with**
 
 ```ts
-import { basename, extname, join } from 'node:path';
-
-import { HighlightSetSchema, type HighlightSet } from '@shared/highlight';
-import type { ResumeSnapshot } from '@shared/resume';
+import { type HighlightSet, HighlightSetSchema } from '@shared/highlight';
 import type { RenderClipResult, RenderResult } from '@shared/render';
-import { TranscriptSchema, type Transcript } from '@shared/transcript';
+import type { ResumeSnapshot } from '@shared/resume';
+import { type Transcript, TranscriptSchema } from '@shared/transcript';
 import { type VideoMeta, VideoMetaSchema } from '@shared/youtube';
+import { basename, extname, join } from 'node:path';
 
 interface SettingsLike {
   get(): { paths: { downloads: string; outputs: string } };
@@ -742,9 +705,7 @@ export class ResumeService {
 
     const [transcript, highlights] = await Promise.all([
       this.tryReadJson<Transcript>(transcriptPath, (raw) => TranscriptSchema.parse(JSON.parse(raw))),
-      this.tryReadJson<HighlightSet>(highlightsPath, (raw) =>
-        HighlightSetSchema.parse(JSON.parse(raw)),
-      ),
+      this.tryReadJson<HighlightSet>(highlightsPath, (raw) => HighlightSetSchema.parse(JSON.parse(raw))),
     ]);
 
     const renderResult = await this.tryRebuildRender(outputDir, highlights);
@@ -787,10 +748,7 @@ export class ResumeService {
       const segments = highlight?.segments ?? [];
       const startSec = segments[0]?.start_sec ?? 0;
       const endSec = segments[segments.length - 1]?.end_sec ?? 0;
-      const montageDurationSec = segments.reduce(
-        (acc, s) => acc + (s.end_sec - s.start_sec),
-        0,
-      );
+      const montageDurationSec = segments.reduce((acc, s) => acc + (s.end_sec - s.start_sec), 0);
       return {
         index: idx + 1,
         title: highlight?.title ?? `Clip ${idx + 1}`,
@@ -827,6 +785,7 @@ git commit -m "feat: ResumeService.hydrate + buildSnapshot (transcript/highlight
 ### Task 4: Wire IPC — main.ts + preload + AppApi
 
 **Files:**
+
 - Modify: `src/main/main.ts`
 - Modify: `src/main/preload.ts`
 - Modify: `src/shared/ipc.ts`
@@ -886,14 +845,14 @@ function getResumeService(): ResumeService {
 Add IPC handlers inside `app.whenReady().then(...)`, near the existing `extract:run` handler:
 
 ```ts
-  ipcMain.handle('resume:detect', (_e, videoId: string) => getResumeService().detect(videoId));
-  ipcMain.handle('resume:hydrate', (_e, sourcePath: string) => getResumeService().hydrate(sourcePath));
+ipcMain.handle('resume:detect', (_e, videoId: string) => getResumeService().detect(videoId));
+ipcMain.handle('resume:hydrate', (_e, sourcePath: string) => getResumeService().hydrate(sourcePath));
 ```
 
 Cleanup in `window-all-closed`:
 
 ```ts
-  resumeService = null;
+resumeService = null;
 ```
 
 (Add it where other singletons are nulled.)
@@ -924,6 +883,7 @@ git commit -m "feat: wire resume:detect + resume:hydrate IPCs (main + preload + 
 ### Task 5: Hook hydrators (5 hooks)
 
 **Files:**
+
 - Modify: `src/renderer/hooks/useVideoPreview.ts`
 - Modify: `src/renderer/hooks/useDownload.ts`
 - Modify: `src/renderer/hooks/useTranscribe.ts`
@@ -981,10 +941,10 @@ Add to the `UseDownload` type:
 Add the implementation inside `useDownload()` (after `cancel`, before `reset`):
 
 ```ts
-  const hydrateDone = useCallback((url: string, outputPath: string) => {
-    urlRef.current = url;
-    setState({ status: 'done', url, outputPath });
-  }, []);
+const hydrateDone = useCallback((url: string, outputPath: string) => {
+  urlRef.current = url;
+  setState({ status: 'done', url, outputPath });
+}, []);
 ```
 
 Update the return statement to include `hydrateDone`.
@@ -1000,12 +960,9 @@ Add to type:
 Add implementation:
 
 ```ts
-  const hydrateDone = useCallback(
-    (audioPath: string, transcriptPath: string, transcript: Transcript) => {
-      setState({ status: 'done', audioPath, transcriptPath, transcript });
-    },
-    [],
-  );
+const hydrateDone = useCallback((audioPath: string, transcriptPath: string, transcript: Transcript) => {
+  setState({ status: 'done', audioPath, transcriptPath, transcript });
+}, []);
 ```
 
 Update return statement.
@@ -1023,13 +980,10 @@ Add to `UseHighlights` type:
 Add implementation (after `cancel`, before `reset`):
 
 ```ts
-  const hydrateDone = useCallback(
-    (audioPath: string, highlightsPath: string, highlightSet: HighlightSet) => {
-      abortRef.current = true; // any in-flight extraction's promise resolution will be ignored
-      setState({ status: 'done', audioPath, highlightsPath, highlightSet });
-    },
-    [],
-  );
+const hydrateDone = useCallback((audioPath: string, highlightsPath: string, highlightSet: HighlightSet) => {
+  abortRef.current = true; // any in-flight extraction's promise resolution will be ignored
+  setState({ status: 'done', audioPath, highlightsPath, highlightSet });
+}, []);
 ```
 
 Update return statement.
@@ -1045,10 +999,10 @@ Add to type:
 Add implementation:
 
 ```ts
-  const hydrateDone = useCallback((audioPath: string, result: RenderResult) => {
-    abortRef.current = true;
-    setState({ status: 'done', audioPath, result });
-  }, []);
+const hydrateDone = useCallback((audioPath: string, result: RenderResult) => {
+  abortRef.current = true;
+  setState({ status: 'done', audioPath, result });
+}, []);
 ```
 
 Update return statement.
@@ -1073,6 +1027,7 @@ git commit -m "feat: add hydrate*() to all 5 NewJob pipeline hooks"
 ### Task 6: `NewJobStateContext.hydrate(snapshot)`
 
 **Files:**
+
 - Modify: `src/renderer/components/NewJobStateContext.tsx`
 
 Adds a `hydrate(snapshot)` method to the context that calls each hook's hydrator in dependency order.
@@ -1080,13 +1035,13 @@ Adds a `hydrate(snapshot)` method to the context that calls each hook's hydrator
 - [ ] **Step 1: Replace `src/renderer/components/NewJobStateContext.tsx` ENTIRELY with**
 
 ```tsx
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { type ReactNode, createContext, useContext, useMemo } from 'react';
 
-import { useDownload, type UseDownload } from '@renderer/hooks/useDownload';
-import { useHighlights, type UseHighlights } from '@renderer/hooks/useHighlights';
-import { useRender, type UseRender } from '@renderer/hooks/useRender';
-import { useTranscribe, type UseTranscribe } from '@renderer/hooks/useTranscribe';
-import { useVideoPreview, type UseVideoPreview } from '@renderer/hooks/useVideoPreview';
+import { type UseDownload, useDownload } from '@renderer/hooks/useDownload';
+import { type UseHighlights, useHighlights } from '@renderer/hooks/useHighlights';
+import { type UseRender, useRender } from '@renderer/hooks/useRender';
+import { type UseTranscribe, useTranscribe } from '@renderer/hooks/useTranscribe';
+import { type UseVideoPreview, useVideoPreview } from '@renderer/hooks/useVideoPreview';
 import type { ResumeSnapshot } from '@shared/resume';
 
 /**
@@ -1173,6 +1128,7 @@ git commit -m "feat: NewJobStateContext.hydrate(snapshot) — push ResumeSnapsho
 ### Task 7: `ResumeBanner` component
 
 **Files:**
+
 - Create: `src/renderer/components/newjob/ResumeBanner.tsx`
 
 A small presentational component shown above PreviewCard when a snapshot is available. Two buttons: 이어서 작업 / 새로 시작.
@@ -1240,10 +1196,12 @@ git commit -m "feat: ResumeBanner — '이어서 작업' / '새로 시작' card 
 ### Task 8: NewJob page integration — probe + render banner + integration test
 
 **Files:**
+
 - Modify: `src/renderer/pages/NewJob.tsx`
 - Modify: `tests/renderer/NewJob.test.tsx`
 
 NewJob page:
+
 - New `useEffect`: when `preview.state.status === 'loaded'` AND `download.state.status === 'idle'` AND user hasn't dismissed, call `window.api.resumeDetect(meta.id)`.
 - New local state `resumeSnapshot` and `resumeDismissed`.
 - Render `<ResumeBanner>` between PreviewCard and DownloadProgress when conditions met.
@@ -1268,25 +1226,25 @@ import type { ResumeSnapshot } from '@shared/resume';
 After the destructure of `useNewJobState()`:
 
 ```ts
-  const [resumeSnapshot, setResumeSnapshot] = useState<ResumeSnapshot | null>(null);
-  const [resumeDismissed, setResumeDismissed] = useState(false);
+const [resumeSnapshot, setResumeSnapshot] = useState<ResumeSnapshot | null>(null);
+const [resumeDismissed, setResumeDismissed] = useState(false);
 
-  useEffect(() => {
-    if (preview.state.status !== 'loaded') {
-      setResumeSnapshot(null);
-      setResumeDismissed(false);
-      return;
-    }
-    if (resumeDismissed) return;
-    if (download.state.status !== 'idle') return;
-    let cancelled = false;
-    void window.api.resumeDetect(preview.state.meta.id).then((snap) => {
-      if (!cancelled) setResumeSnapshot(snap);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [preview.state, download.state.status, resumeDismissed]);
+useEffect(() => {
+  if (preview.state.status !== 'loaded') {
+    setResumeSnapshot(null);
+    setResumeDismissed(false);
+    return;
+  }
+  if (resumeDismissed) return;
+  if (download.state.status !== 'idle') return;
+  let cancelled = false;
+  void window.api.resumeDetect(preview.state.meta.id).then((snap) => {
+    if (!cancelled) setResumeSnapshot(snap);
+  });
+  return () => {
+    cancelled = true;
+  };
+}, [preview.state, download.state.status, resumeDismissed]);
 ```
 
 - [ ] **Step 4: Render `<ResumeBanner>` in the JSX**
@@ -1315,7 +1273,7 @@ Find the PreviewCard render block. Insert the banner just before it:
 You'll also need to destructure `hydrate` from `useNewJobState()`:
 
 ```ts
-  const { preview, download, transcribe, highlights, renderShort, hydrate } = useNewJobState();
+const { preview, download, transcribe, highlights, renderShort, hydrate } = useNewJobState();
 ```
 
 - [ ] **Step 5: Update `tests/renderer/NewJob.test.tsx` window.api stub**
@@ -1331,67 +1289,67 @@ Find the `installApiMock` (or wherever the `window.api` stub lives). Add to the 
 
 ```tsx
 it('shows ResumeBanner when resumeDetect returns a snapshot and hydrates on click', async () => {
-    const user = userEvent.setup();
-    const snap = {
-      url: 'https://youtu.be/dQw4w9WgXcQ',
-      sourcePath: '/tmp/dQw4w9WgXcQ.mp4',
-      meta: {
-        id: 'dQw4w9WgXcQ',
-        title: 'Never Gonna Give You Up',
-        channel: 'Rick Astley',
-        durationSec: 213,
-        thumbnailUrl: 'https://example.com/t.jpg',
-        webpageUrl: 'https://youtu.be/dQw4w9WgXcQ',
-      },
-      download: { outputPath: '/tmp/dQw4w9WgXcQ.mp4' },
-      transcript: undefined,
-      highlights: undefined,
-      render: undefined,
-    };
-    (window.api.resumeDetect as ReturnType<typeof vi.fn>).mockResolvedValue(snap);
-    render(
-      <NewJobStateProvider>
-        <NewJobPage />
-      </NewJobStateProvider>,
-    );
-    await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
-    await user.click(screen.getByRole('button', { name: '미리보기' }));
-    // Banner appears with download-only progress copy
-    await waitFor(() => expect(screen.getByText(/다운로드만 완료된 영상/)).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: '이어서 작업' }));
-    // After hydrate: banner gone, DownloadProgress 'done' is shown
-    await waitFor(() => expect(screen.queryByText(/다운로드만 완료된 영상/)).not.toBeInTheDocument());
+  const user = userEvent.setup();
+  const snap = {
+    url: 'https://youtu.be/dQw4w9WgXcQ',
+    sourcePath: '/tmp/dQw4w9WgXcQ.mp4',
+    meta: {
+      id: 'dQw4w9WgXcQ',
+      title: 'Never Gonna Give You Up',
+      channel: 'Rick Astley',
+      durationSec: 213,
+      thumbnailUrl: 'https://example.com/t.jpg',
+      webpageUrl: 'https://youtu.be/dQw4w9WgXcQ',
+    },
+    download: { outputPath: '/tmp/dQw4w9WgXcQ.mp4' },
+    transcript: undefined,
+    highlights: undefined,
+    render: undefined,
+  };
+  (window.api.resumeDetect as ReturnType<typeof vi.fn>).mockResolvedValue(snap);
+  render(
+    <NewJobStateProvider>
+      <NewJobPage />
+    </NewJobStateProvider>,
+  );
+  await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
+  await user.click(screen.getByRole('button', { name: '미리보기' }));
+  // Banner appears with download-only progress copy
+  await waitFor(() => expect(screen.getByText(/다운로드만 완료된 영상/)).toBeInTheDocument());
+  await user.click(screen.getByRole('button', { name: '이어서 작업' }));
+  // After hydrate: banner gone, DownloadProgress 'done' is shown
+  await waitFor(() => expect(screen.queryByText(/다운로드만 완료된 영상/)).not.toBeInTheDocument());
 });
 
 it('hides ResumeBanner when 새로 시작 is clicked', async () => {
-    const user = userEvent.setup();
-    const snap = {
-      url: 'https://youtu.be/dQw4w9WgXcQ',
-      sourcePath: '/tmp/dQw4w9WgXcQ.mp4',
-      meta: {
-        id: 'dQw4w9WgXcQ',
-        title: 'Never Gonna Give You Up',
-        channel: 'Rick Astley',
-        durationSec: 213,
-        thumbnailUrl: 'https://example.com/t.jpg',
-        webpageUrl: 'https://youtu.be/dQw4w9WgXcQ',
-      },
-      download: { outputPath: '/tmp/dQw4w9WgXcQ.mp4' },
-      transcript: undefined,
-      highlights: undefined,
-      render: undefined,
-    };
-    (window.api.resumeDetect as ReturnType<typeof vi.fn>).mockResolvedValue(snap);
-    render(
-      <NewJobStateProvider>
-        <NewJobPage />
-      </NewJobStateProvider>,
-    );
-    await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
-    await user.click(screen.getByRole('button', { name: '미리보기' }));
-    await waitFor(() => expect(screen.getByText(/다운로드만 완료된 영상/)).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: '새로 시작' }));
-    expect(screen.queryByText(/다운로드만 완료된 영상/)).not.toBeInTheDocument();
+  const user = userEvent.setup();
+  const snap = {
+    url: 'https://youtu.be/dQw4w9WgXcQ',
+    sourcePath: '/tmp/dQw4w9WgXcQ.mp4',
+    meta: {
+      id: 'dQw4w9WgXcQ',
+      title: 'Never Gonna Give You Up',
+      channel: 'Rick Astley',
+      durationSec: 213,
+      thumbnailUrl: 'https://example.com/t.jpg',
+      webpageUrl: 'https://youtu.be/dQw4w9WgXcQ',
+    },
+    download: { outputPath: '/tmp/dQw4w9WgXcQ.mp4' },
+    transcript: undefined,
+    highlights: undefined,
+    render: undefined,
+  };
+  (window.api.resumeDetect as ReturnType<typeof vi.fn>).mockResolvedValue(snap);
+  render(
+    <NewJobStateProvider>
+      <NewJobPage />
+    </NewJobStateProvider>,
+  );
+  await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
+  await user.click(screen.getByRole('button', { name: '미리보기' }));
+  await waitFor(() => expect(screen.getByText(/다운로드만 완료된 영상/)).toBeInTheDocument());
+  await user.click(screen.getByRole('button', { name: '새로 시작' }));
+  expect(screen.queryByText(/다운로드만 완료된 영상/)).not.toBeInTheDocument();
 });
 ```
 
@@ -1416,6 +1374,7 @@ git commit -m "feat: NewJob page probes resumeDetect on preview→loaded; Resume
 ### Task 9: History "이어서 작업" button + test
 
 **Files:**
+
 - Modify: `src/renderer/components/history/JobDetailDrawer.tsx`
 - Modify: `tests/renderer/History.test.tsx`
 
@@ -1426,41 +1385,40 @@ Adds a button to the JobDetailDrawer that navigates to `/` and calls `resumeHydr
 Add imports at the top:
 
 ```ts
-import { useNavigate } from 'react-router-dom';
-
 import { useNewJobState } from '@renderer/components/NewJobStateContext';
+import { useNavigate } from 'react-router-dom';
 ```
 
 Inside the `JobDetailDrawer` function body (top), add:
 
 ```ts
-  const navigate = useNavigate();
-  const { hydrate } = useNewJobState();
+const navigate = useNavigate();
+const { hydrate } = useNewJobState();
 
-  async function handleResume() {
-    if (!detail) return;
-    const snap = await window.api.resumeHydrate(detail.job.sourcePath);
-    if (snap) {
-      hydrate(snap);
-      navigate('/');
-      onClose();
-    } else {
-      // Source file is gone or meta corrupt — silently bail; user stays on history.
-      // (Future: show a toast.)
-    }
+async function handleResume() {
+  if (!detail) return;
+  const snap = await window.api.resumeHydrate(detail.job.sourcePath);
+  if (snap) {
+    hydrate(snap);
+    navigate('/');
+    onClose();
+  } else {
+    // Source file is gone or meta corrupt — silently bail; user stays on history.
+    // (Future: show a toast.)
   }
+}
 ```
 
 In the JSX `<div className="gap-sm flex">` block (the existing buttons section), add a new button as the FIRST child:
 
 ```tsx
-              <button
-                type="button"
-                onClick={() => void handleResume()}
-                className="bg-primary px-xl text-button-md text-on-primary h-10 rounded-full font-semibold"
-              >
-                이어서 작업
-              </button>
+<button
+  type="button"
+  onClick={() => void handleResume()}
+  className="bg-primary px-xl text-button-md text-on-primary h-10 rounded-full font-semibold"
+>
+  이어서 작업
+</button>
 ```
 
 (The existing "폴더 열기" button changes from `bg-primary` to `border-ink ... border bg-transparent` style if the design wants only one primary action per card. But to keep the change minimal, leave the existing buttons styled as they are — having two `bg-primary` buttons is acceptable for v1.)
@@ -1492,12 +1450,12 @@ Append to `tests/renderer/History.test.tsx`:
 
 ```tsx
 it('clicks 이어서 작업 in JobDetailDrawer to call resumeHydrate', async () => {
-    const user = userEvent.setup();
-    // (reuse existing test setup that opens the drawer for a job — see other tests in this file
-    //  for the exact pattern. Once the drawer is open with detail loaded, click 이어서 작업.)
-    // ...
-    await user.click(await screen.findByRole('button', { name: '이어서 작업' }));
-    expect(window.api.resumeHydrate).toHaveBeenCalled();
+  const user = userEvent.setup();
+  // (reuse existing test setup that opens the drawer for a job — see other tests in this file
+  //  for the exact pattern. Once the drawer is open with detail loaded, click 이어서 작업.)
+  // ...
+  await user.click(await screen.findByRole('button', { name: '이어서 작업' }));
+  expect(window.api.resumeHydrate).toHaveBeenCalled();
 });
 ```
 
@@ -1534,6 +1492,7 @@ cd sidecar && uv run pytest 2>&1 | tail -5 && cd ..
 ```
 
 Expected:
+
 - typecheck: 0 errors
 - lint: 0 errors (1 known `__dirname` warning OK)
 - vitest: 173 baseline + ~18 new = ~190 (give or take)
@@ -1551,6 +1510,7 @@ git push origin master 2>&1 | tail -3
 - [ ] **Step 3: Manual integration check (controller hands off to user)**
 
 Skip in this task — controller will hand off to user. Manual checks:
+
 1. Paste a previously-downloaded URL → ResumeBanner appears with correct progress copy.
 2. Click 이어서 작업 → relevant cards show done state.
 3. Click 새로 시작 → banner disappears.

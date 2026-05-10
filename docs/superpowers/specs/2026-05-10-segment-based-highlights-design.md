@@ -13,12 +13,14 @@
 ### 1.1 `Highlight` (replaces M5 schema)
 
 ```ts
-export const HighlightSegmentSchema = z.object({
-  start_sec: z.number().nonnegative(),
-  end_sec: z.number().nonnegative(),
-}).refine((v) => v.end_sec > v.start_sec, {
-  message: 'end_sec must be greater than start_sec',
-});
+export const HighlightSegmentSchema = z
+  .object({
+    start_sec: z.number().nonnegative(),
+    end_sec: z.number().nonnegative(),
+  })
+  .refine((v) => v.end_sec > v.start_sec, {
+    message: 'end_sec must be greater than start_sec',
+  });
 
 export const HighlightSchema = z.object({
   /** 1+ time ranges in source video time. Sorted chronologically by start_sec. */
@@ -46,9 +48,7 @@ The LLM returns indices, not times:
 
 ```json
 {
-  "highlights": [
-    { "segment_indices": [12, 13, 18, 19], "title": "...", "hook": "..." }
-  ]
+  "highlights": [{ "segment_indices": [12, 13, 18, 19], "title": "...", "hook": "..." }]
 }
 ```
 
@@ -74,9 +74,9 @@ Rewritten to chunk by **segments** instead of words:
 
 ```ts
 export interface ChunkPlannerOptions {
-  threshold: number;   // 150 segments (~7-15 min depending on segment length)
-  chunkSize: number;   // 100 segments per chunk
-  overlap: number;     // 10 segments
+  threshold: number; // 150 segments (~7-15 min depending on segment length)
+  chunkSize: number; // 100 segments per chunk
+  overlap: number; // 10 segments
 }
 
 export interface ChunkRange {
@@ -120,8 +120,13 @@ For single-segment highlights, the `select` expression has just one `between()` 
 `buildCenterArgs` and `buildTrackedArgs` change signatures:
 
 ```ts
-function buildCenterArgs(sourcePath: string, segments: HighlightSegment[], outputPath: string): string[]
-function buildTrackedArgs(sourcePath: string, segments: HighlightSegment[], outputPath: string, cmdPath: string): string[]
+function buildCenterArgs(sourcePath: string, segments: HighlightSegment[], outputPath: string): string[];
+function buildTrackedArgs(
+  sourcePath: string,
+  segments: HighlightSegment[],
+  outputPath: string,
+  cmdPath: string,
+): string[];
 ```
 
 They build the `select` / `aselect` expressions internally from `segments`. The `appendSubtitleFilter` helper from M8 stays unchanged.
@@ -159,7 +164,7 @@ For each highlight, transcript words are filtered per-segment and rebased to mon
 const rebasedWords: Word[] = [];
 let cumulativeMontageTime = 0;
 for (const seg of highlight.segments) {
-  const segWords = transcriptWords.filter(w => w.start < seg.end_sec && w.end > seg.start_sec);
+  const segWords = transcriptWords.filter((w) => w.start < seg.end_sec && w.end > seg.start_sec);
   for (const w of segWords) {
     rebasedWords.push({
       text: w.text,
@@ -211,14 +216,14 @@ No conceptual change. Each highlight still produces one mp4. Per-clip status dis
 
 ## 6. Testing
 
-| File | Change |
-|---|---|
-| `HighlightService.test.ts` | Rewrite all cases — segment-indices LLM responses, segment-time mapping, dedup, sort, out-of-range filter, multi-chunk + rerank with global indices. ~7 cases. |
-| `ChunkPlanner.test.ts` | Rewrite for segments instead of words. ~5 cases. |
-| `RenderService.test.ts` | +5 cases on top of existing 15: multi-segment select-filter args, multi-segment tracking aggregation, multi-segment subtitle rebasing, single-segment regression (degenerate path stays identical), tracking-fallback when one segment has 0 frames. |
-| `SubtitleGenerator.test.ts` | No change (still operates on words). |
-| `SendcmdGenerator.test.ts` | No change (still operates on `TrackResult`). |
-| `HighlightCard` | Manual visual check via `yarn dev`. |
+| File                        | Change                                                                                                                                                                                                                                               |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HighlightService.test.ts`  | Rewrite all cases — segment-indices LLM responses, segment-time mapping, dedup, sort, out-of-range filter, multi-chunk + rerank with global indices. ~7 cases.                                                                                       |
+| `ChunkPlanner.test.ts`      | Rewrite for segments instead of words. ~5 cases.                                                                                                                                                                                                     |
+| `RenderService.test.ts`     | +5 cases on top of existing 15: multi-segment select-filter args, multi-segment tracking aggregation, multi-segment subtitle rebasing, single-segment regression (degenerate path stays identical), tracking-fallback when one segment has 0 frames. |
+| `SubtitleGenerator.test.ts` | No change (still operates on words).                                                                                                                                                                                                                 |
+| `SendcmdGenerator.test.ts`  | No change (still operates on `TrackResult`).                                                                                                                                                                                                         |
+| `HighlightCard`             | Manual visual check via `yarn dev`.                                                                                                                                                                                                                  |
 
 Roughly **+15 vitest cases changed/added**, no Python side change.
 
@@ -237,11 +242,11 @@ Roughly **+15 vitest cases changed/added**, no Python side change.
 
 ## 8. Risk + edge cases
 
-| Risk | Mitigation |
-|---|---|
-| LLM picks 0 valid highlights (all filtered out) | Service returns empty array; UI shows "0개 추출" — user retries with looser min/max settings |
+| Risk                                                                             | Mitigation                                                                                                     |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| LLM picks 0 valid highlights (all filtered out)                                  | Service returns empty array; UI shows "0개 추출" — user retries with looser min/max settings                   |
 | LLM picks `segment_indices` referencing chunk-local indices in a multi-chunk run | Service rebases to global before rerank; rerank prompt explicitly says "global indices across the whole video" |
-| ffmpeg `select` syntax error on edge inputs (e.g., `between(t,5.0,5.0)`) | `HighlightSegmentSchema.refine(end > start)` prevents zero-duration segments at the schema level |
-| Tracking of multi-segment ends up out-of-sync (montage time mismatch) | Unit test in RenderService.test.ts asserts the expected montage timestamps after rebasing |
-| Subtitle words straddling segment boundaries display oddly | Clamped to segment edge; visible word portion gets the right time. Acceptable trade-off. |
-| Project becomes M11 instead of original M10 packaging | Rename in README; spec section 8.2 of the original design doc gets a note pointing to this spec. |
+| ffmpeg `select` syntax error on edge inputs (e.g., `between(t,5.0,5.0)`)         | `HighlightSegmentSchema.refine(end > start)` prevents zero-duration segments at the schema level               |
+| Tracking of multi-segment ends up out-of-sync (montage time mismatch)            | Unit test in RenderService.test.ts asserts the expected montage timestamps after rebasing                      |
+| Subtitle words straddling segment boundaries display oddly                       | Clamped to segment edge; visible word portion gets the right time. Acceptable trade-off.                       |
+| Project becomes M11 instead of original M10 packaging                            | Rename in README; spec section 8.2 of the original design doc gets a note pointing to this spec.               |

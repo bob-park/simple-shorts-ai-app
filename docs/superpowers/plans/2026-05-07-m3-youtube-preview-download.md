@@ -40,6 +40,7 @@ tests/
 ```
 
 **Decomposition rationale:**
+
 - `src/shared/youtube.ts` lives in shared because URL validation must be identical on both ends of the IPC boundary, and the `VideoMeta`/`DownloadProgress` types are returned across that boundary.
 - `YouTubeService` is the only place yt-dlp is imported. Tests inject a mock `youtubeDl` so we can exercise the wrapper logic without spawning a real binary.
 - The `newjob/` component folder mirrors the `settings/` folder from M2 — page-scoped components living next to siblings they share idioms with.
@@ -52,6 +53,7 @@ tests/
 ### Task 1: Shared YouTube types + URL validation
 
 **Files:**
+
 - Create: `src/shared/youtube.ts`
 
 This file is imported by both main and renderer. Pure types and pure functions only.
@@ -91,13 +93,7 @@ export const DownloadProgressSchema = z.object({
 });
 export type DownloadProgress = z.infer<typeof DownloadProgressSchema>;
 
-export type DownloadStatus =
-  | 'idle'
-  | 'starting'
-  | 'downloading'
-  | 'done'
-  | 'canceled'
-  | 'error';
+export type DownloadStatus = 'idle' | 'starting' | 'downloading' | 'done' | 'canceled' | 'error';
 
 /** True iff input is a syntactically valid YouTube URL on a known host. */
 export function isYoutubeUrl(input: string): boolean {
@@ -160,6 +156,7 @@ git commit -m "feat(m3): add shared YouTube types, schemas, and URL validation"
 ### Task 2: Tests for shared YouTube helpers
 
 **Files:**
+
 - Create: `src/shared/youtube.test.ts`
 
 Pure-function tests for the URL helpers — fast, no mocking needed.
@@ -169,8 +166,9 @@ Pure-function tests for the URL helpers — fast, no mocking needed.
 Create `src/shared/youtube.test.ts`:
 
 ```ts
-import { describe, it, expect } from 'vitest';
-import { isYoutubeUrl, extractVideoId } from './youtube';
+import { describe, expect, it } from 'vitest';
+
+import { extractVideoId, isYoutubeUrl } from './youtube';
 
 describe('isYoutubeUrl', () => {
   it.each([
@@ -192,9 +190,7 @@ describe('isYoutubeUrl', () => {
 
 describe('extractVideoId', () => {
   it('reads ?v= from a standard watch URL', () => {
-    expect(extractVideoId('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe(
-      'dQw4w9WgXcQ',
-    );
+    expect(extractVideoId('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBe('dQw4w9WgXcQ');
   });
 
   it('reads the path from a youtu.be short link', () => {
@@ -240,6 +236,7 @@ git commit -m "test(m3): cover isYoutubeUrl and extractVideoId edge cases"
 ### Task 3: Install youtube-dl-exec
 
 **Files:**
+
 - Modify: `package.json` + `yarn.lock`
 
 - [ ] **Step 1: Install**
@@ -286,6 +283,7 @@ git commit -m "chore(m3): add youtube-dl-exec for yt-dlp integration"
 ### Task 4: YouTubeService — fetchMeta (TDD)
 
 **Files:**
+
 - Create: `src/main/services/YouTubeService.ts`
 - Create: `src/main/services/YouTubeService.test.ts`
 
@@ -296,7 +294,8 @@ The service is constructed with an injected `youtubeDl`-like function so tests c
 Create `src/main/services/YouTubeService.test.ts`:
 
 ```ts
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { YouTubeService } from './YouTubeService';
 
 describe('YouTubeService.fetchMeta', () => {
@@ -342,9 +341,7 @@ describe('YouTubeService.fetchMeta', () => {
   });
 
   it('rejects non-YouTube URLs before calling yt-dlp', async () => {
-    await expect(service.fetchMeta('https://vimeo.com/123')).rejects.toThrow(
-      /not a recognized YouTube/i,
-    );
+    await expect(service.fetchMeta('https://vimeo.com/123')).rejects.toThrow(/not a recognized YouTube/i);
     expect(youtubeDl).not.toHaveBeenCalled();
   });
 
@@ -355,9 +352,7 @@ describe('YouTubeService.fetchMeta', () => {
 
   it('passes through yt-dlp execution errors', async () => {
     youtubeDl.mockRejectedValue(new Error('Video unavailable'));
-    await expect(service.fetchMeta('https://youtu.be/x')).rejects.toThrow(
-      /Video unavailable/,
-    );
+    await expect(service.fetchMeta('https://youtu.be/x')).rejects.toThrow(/Video unavailable/);
   });
 });
 ```
@@ -375,14 +370,11 @@ Expected: FAIL with module-not-found.
 Create `src/main/services/YouTubeService.ts`:
 
 ```ts
+import { type VideoMeta, VideoMetaSchema, isYoutubeUrl } from '@shared/youtube';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { isYoutubeUrl, VideoMetaSchema, type VideoMeta } from '@shared/youtube';
 
 /** Minimal surface of `youtube-dl-exec` we depend on for metadata calls. */
-export type YoutubeDlLike = (
-  url: string,
-  flags: Record<string, unknown>,
-) => Promise<unknown>;
+export type YoutubeDlLike = (url: string, flags: Record<string, unknown>) => Promise<unknown>;
 
 /** Minimal surface of `node:child_process.spawn` we depend on for downloads. */
 export type SpawnLike = (
@@ -449,6 +441,7 @@ git commit -m "feat(m3): add YouTubeService.fetchMeta with injected yt-dlp wrapp
 ### Task 5: YouTubeService — download with progress + cancel
 
 **Files:**
+
 - Modify: `src/main/services/YouTubeService.ts`
 - Modify: `src/main/services/YouTubeService.test.ts`
 
@@ -553,14 +546,11 @@ Expected: 4 fetchMeta tests still pass; 5 download tests fail because `download`
 Replace the contents of `src/main/services/YouTubeService.ts` with:
 
 ```ts
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { isYoutubeUrl, VideoMetaSchema, type VideoMeta } from '@shared/youtube';
+import { type VideoMeta, VideoMetaSchema, isYoutubeUrl } from '@shared/youtube';
 import type { DownloadProgress } from '@shared/youtube';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 
-export type YoutubeDlLike = (
-  url: string,
-  flags: Record<string, unknown>,
-) => Promise<unknown>;
+export type YoutubeDlLike = (url: string, flags: Record<string, unknown>) => Promise<unknown>;
 
 export type SpawnLike = (
   command: string,
@@ -728,6 +718,7 @@ git commit -m "feat(m3): add YouTubeService.download with progress streaming and
 ### Task 6: IPC contract extension
 
 **Files:**
+
 - Modify: `src/shared/ipc.ts`
 
 Add the four new methods. `onDownloadProgress` is the one-way subscription pattern — it returns an unsubscribe function (cleanup-in-callback).
@@ -804,6 +795,7 @@ git commit -m "feat(m3): extend AppApi with video preview, download, cancel, and
 ### Task 7: Wire YouTube IPC handlers in main.ts
 
 **Files:**
+
 - Modify: `src/main/main.ts`
 
 Instantiate `YouTubeService` at startup, register the 4 handlers, and emit `download:progress` events on the active window.
@@ -815,7 +807,8 @@ a. Update imports — add these lines (place near the other electron imports, pr
 ```ts
 import { spawn } from 'node:child_process';
 import youtubeDl from 'youtube-dl-exec';
-import { YouTubeService, type DownloadHandle } from './services/YouTubeService';
+
+import { type DownloadHandle, YouTubeService } from './services/YouTubeService';
 ```
 
 Ensure `BrowserWindow` and `shell` are still imported from electron (they already are).
@@ -898,6 +891,7 @@ git commit -m "feat(m3): wire YouTube IPC handlers and progress event emit in ma
 ### Task 8: Update preload bridge
 
 **Files:**
+
 - Modify: `src/main/preload.ts`
 
 Expose the four new methods + the subscription pattern for progress events.
@@ -961,6 +955,7 @@ git commit -m "feat(m3): expose video preview, download, cancel, and progress on
 ### Task 9: useVideoPreview hook
 
 **Files:**
+
 - Create: `src/renderer/hooks/useVideoPreview.ts`
 
 Idle → loading → loaded | error state machine, triggered by an explicit `fetch(url)` call (not on every keystroke).
@@ -969,6 +964,7 @@ Idle → loading → loaded | error state machine, triggered by an explicit `fet
 
 ```ts
 import { useCallback, useState } from 'react';
+
 import type { VideoMeta } from '@shared/youtube';
 
 export type VideoPreviewState =
@@ -1024,6 +1020,7 @@ git commit -m "feat(m3): add useVideoPreview hook"
 ### Task 10: useDownload hook
 
 **Files:**
+
 - Create: `src/renderer/hooks/useDownload.ts`
 
 Subscribes to `download:progress` for the lifetime of the component, exposes start/cancel.
@@ -1032,6 +1029,7 @@ Subscribes to `download:progress` for the lifetime of the component, exposes sta
 
 ```ts
 import { useCallback, useEffect, useRef, useState } from 'react';
+
 import type { DownloadProgress, DownloadStatus } from '@shared/youtube';
 
 export type DownloadState =
@@ -1111,6 +1109,7 @@ git commit -m "feat(m3): add useDownload hook with progress subscription"
 ### Task 11: UrlInput component
 
 **Files:**
+
 - Create: `src/renderer/components/newjob/UrlInput.tsx`
 
 Input field + 미리보기 button. Disables button when input isn't a YouTube URL.
@@ -1119,6 +1118,7 @@ Input field + 미리보기 button. Disables button when input isn't a YouTube UR
 
 ```tsx
 import { useState } from 'react';
+
 import { isYoutubeUrl } from '@shared/youtube';
 
 export function UrlInput({
@@ -1141,7 +1141,7 @@ export function UrlInput({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-sm">
+    <form onSubmit={handleSubmit} className="gap-sm flex">
       <input
         type="url"
         inputMode="url"
@@ -1151,12 +1151,12 @@ export function UrlInput({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         disabled={disabled}
-        className="h-12 flex-1 rounded-full border border-hairline bg-canvas px-xl text-body-md text-ink focus:border-brand-blue-deep focus:outline-none disabled:opacity-50"
+        className="border-hairline bg-canvas px-xl text-body-md text-ink focus:border-brand-blue-deep h-12 flex-1 rounded-full border focus:outline-none disabled:opacity-50"
       />
       <button
         type="submit"
         disabled={!valid || disabled}
-        className="h-12 rounded-full bg-primary px-xl text-button-md font-semibold text-on-primary disabled:opacity-50"
+        className="bg-primary px-xl text-button-md text-on-primary h-12 rounded-full font-semibold disabled:opacity-50"
       >
         미리보기
       </button>
@@ -1184,6 +1184,7 @@ git commit -m "feat(m3): add UrlInput component with YouTube URL validation"
 ### Task 12: PreviewCard component
 
 **Files:**
+
 - Create: `src/renderer/components/newjob/PreviewCard.tsx`
 
 Renders thumbnail + title + channel + duration + 다운로드 button.
@@ -1215,33 +1216,28 @@ export function PreviewCard({
   downloadDisabled?: boolean;
 }) {
   return (
-    <article className="overflow-hidden rounded-xl border border-hairline bg-canvas shadow-1">
-      <img
-        src={meta.thumbnailUrl}
-        alt=""
-        className="aspect-video w-full object-cover"
-        loading="lazy"
-      />
-      <div className="flex flex-col gap-md p-xxl">
-        <header className="flex flex-col gap-xs">
-          <h2 className="text-card-title font-semibold text-ink">{meta.title}</h2>
+    <article className="border-hairline bg-canvas shadow-1 overflow-hidden rounded-xl border">
+      <img src={meta.thumbnailUrl} alt="" className="aspect-video w-full object-cover" loading="lazy" />
+      <div className="gap-md p-xxl flex flex-col">
+        <header className="gap-xs flex flex-col">
+          <h2 className="text-card-title text-ink font-semibold">{meta.title}</h2>
           <p className="text-body-sm text-slate">
             {meta.channel} · {formatDuration(meta.durationSec)}
           </p>
         </header>
-        <div className="flex gap-sm">
+        <div className="gap-sm flex">
           <button
             type="button"
             onClick={onDownload}
             disabled={downloadDisabled}
-            className="h-12 rounded-full bg-primary px-xl text-button-md font-semibold text-on-primary disabled:opacity-50"
+            className="bg-primary px-xl text-button-md text-on-primary h-12 rounded-full font-semibold disabled:opacity-50"
           >
             다운로드
           </button>
           <button
             type="button"
             onClick={onClear}
-            className="h-12 rounded-full border border-ink bg-transparent px-xl text-button-md font-semibold text-ink"
+            className="border-ink px-xl text-button-md text-ink h-12 rounded-full border bg-transparent font-semibold"
           >
             URL 변경
           </button>
@@ -1271,6 +1267,7 @@ git commit -m "feat(m3): add PreviewCard with thumbnail, meta, and action button
 ### Task 13: DownloadProgress component
 
 **Files:**
+
 - Create: `src/renderer/components/newjob/DownloadProgress.tsx`
 
 Progress bar + ETA + cancel button. Shows different states for downloading / done / error / canceled.
@@ -1304,33 +1301,28 @@ type Props =
 
 export function DownloadProgress(props: Props) {
   return (
-    <section className="rounded-xl border border-hairline bg-canvas p-xxl shadow-1">
-      {props.status === 'starting' ? (
-        <p className="text-body-md text-slate">다운로드 준비 중...</p>
-      ) : null}
+    <section className="border-hairline bg-canvas p-xxl shadow-1 rounded-xl border">
+      {props.status === 'starting' ? <p className="text-body-md text-slate">다운로드 준비 중...</p> : null}
 
       {props.status === 'downloading' ? (
-        <div className="flex flex-col gap-md">
-          <div className="flex items-baseline justify-between gap-md">
-            <h3 className="text-card-title font-semibold text-ink">
-              {props.progress.percent.toFixed(1)}%
-            </h3>
+        <div className="gap-md flex flex-col">
+          <div className="gap-md flex items-baseline justify-between">
+            <h3 className="text-card-title text-ink font-semibold">{props.progress.percent.toFixed(1)}%</h3>
             <p className="text-body-sm text-slate">
-              {formatBytes(props.progress.downloadedBytes)} /{' '}
-              {formatBytes(props.progress.totalBytes)} · ETA{' '}
+              {formatBytes(props.progress.downloadedBytes)} / {formatBytes(props.progress.totalBytes)} · ETA{' '}
               {formatEta(props.progress.etaSec)}
             </p>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-surface">
+          <div className="bg-surface h-2 overflow-hidden rounded-full">
             <div
-              className="h-full bg-primary transition-[width]"
+              className="bg-primary h-full transition-[width]"
               style={{ width: `${Math.min(100, props.progress.percent)}%` }}
             />
           </div>
           <button
             type="button"
             onClick={props.onCancel}
-            className="h-10 self-start rounded-full border border-ink bg-transparent px-xl text-button-md font-semibold text-ink"
+            className="border-ink px-xl text-button-md text-ink h-10 self-start rounded-full border bg-transparent font-semibold"
           >
             취소
           </button>
@@ -1338,21 +1330,21 @@ export function DownloadProgress(props: Props) {
       ) : null}
 
       {props.status === 'done' ? (
-        <div className="flex flex-col gap-md">
-          <h3 className="text-card-title font-semibold text-success-text">다운로드 완료</h3>
-          <p className="break-all text-body-sm text-slate">{props.outputPath}</p>
-          <div className="flex gap-sm">
+        <div className="gap-md flex flex-col">
+          <h3 className="text-card-title text-success-text font-semibold">다운로드 완료</h3>
+          <p className="text-body-sm text-slate break-all">{props.outputPath}</p>
+          <div className="gap-sm flex">
             <button
               type="button"
               onClick={props.onReveal}
-              className="h-10 rounded-full bg-primary px-xl text-button-md font-semibold text-on-primary"
+              className="bg-primary px-xl text-button-md text-on-primary h-10 rounded-full font-semibold"
             >
               파일 열기
             </button>
             <button
               type="button"
               onClick={props.onReset}
-              className="h-10 rounded-full border border-ink bg-transparent px-xl text-button-md font-semibold text-ink"
+              className="border-ink px-xl text-button-md text-ink h-10 rounded-full border bg-transparent font-semibold"
             >
               새 작업
             </button>
@@ -1361,12 +1353,12 @@ export function DownloadProgress(props: Props) {
       ) : null}
 
       {props.status === 'canceled' ? (
-        <div className="flex flex-col gap-md">
-          <h3 className="text-card-title font-semibold text-ink">취소됨</h3>
+        <div className="gap-md flex flex-col">
+          <h3 className="text-card-title text-ink font-semibold">취소됨</h3>
           <button
             type="button"
             onClick={props.onReset}
-            className="h-10 self-start rounded-full bg-primary px-xl text-button-md font-semibold text-on-primary"
+            className="bg-primary px-xl text-button-md text-on-primary h-10 self-start rounded-full font-semibold"
           >
             다시 시도
           </button>
@@ -1374,13 +1366,13 @@ export function DownloadProgress(props: Props) {
       ) : null}
 
       {props.status === 'error' ? (
-        <div className="flex flex-col gap-md">
-          <h3 className="text-card-title font-semibold text-brand-coral">실패</h3>
-          <p className="break-all text-body-sm text-slate">{props.error.message}</p>
+        <div className="gap-md flex flex-col">
+          <h3 className="text-card-title text-brand-coral font-semibold">실패</h3>
+          <p className="text-body-sm text-slate break-all">{props.error.message}</p>
           <button
             type="button"
             onClick={props.onReset}
-            className="h-10 self-start rounded-full bg-primary px-xl text-button-md font-semibold text-on-primary"
+            className="bg-primary px-xl text-button-md text-on-primary h-10 self-start rounded-full font-semibold"
           >
             다시 시도
           </button>
@@ -1410,6 +1402,7 @@ git commit -m "feat(m3): add DownloadProgress with starting/downloading/done/can
 ### Task 14: Compose NewJob.tsx page
 
 **Files:**
+
 - Modify: `src/renderer/pages/NewJob.tsx`
 
 Replace the placeholder with a real composition that orchestrates the two hooks and three components.
@@ -1427,13 +1420,12 @@ export function NewJobPage() {
   const preview = useVideoPreview();
   const download = useDownload();
 
-  const downloadInFlight =
-    download.status === 'starting' || download.status === 'downloading';
+  const downloadInFlight = download.status === 'starting' || download.status === 'downloading';
 
   return (
-    <section className="flex flex-col gap-xl p-section">
+    <section className="gap-xl p-section flex flex-col">
       <header>
-        <h1 className="text-heading-md font-semibold text-ink">새 작업</h1>
+        <h1 className="text-heading-md text-ink font-semibold">새 작업</h1>
         <p className="mt-md text-body-md text-slate">
           YouTube URL을 입력하면 영상 정보를 미리 확인하고 다운로드할 수 있습니다.
         </p>
@@ -1444,14 +1436,10 @@ export function NewJobPage() {
         disabled={preview.state.status === 'loading' || downloadInFlight}
       />
 
-      {preview.state.status === 'loading' ? (
-        <p className="text-body-md text-slate">영상 정보 가져오는 중...</p>
-      ) : null}
+      {preview.state.status === 'loading' ? <p className="text-body-md text-slate">영상 정보 가져오는 중...</p> : null}
 
       {preview.state.status === 'error' ? (
-        <p className="text-body-md text-brand-coral">
-          영상 정보를 불러오지 못했습니다: {preview.state.error.message}
-        </p>
+        <p className="text-body-md text-brand-coral">영상 정보를 불러오지 못했습니다: {preview.state.error.message}</p>
       ) : null}
 
       {preview.state.status === 'loaded' && download.state.status === 'idle' ? (
@@ -1462,9 +1450,7 @@ export function NewJobPage() {
         />
       ) : null}
 
-      {download.state.status === 'starting' ? (
-        <DownloadProgress status="starting" />
-      ) : null}
+      {download.state.status === 'starting' ? <DownloadProgress status="starting" /> : null}
 
       {download.state.status === 'downloading' ? (
         <DownloadProgress
@@ -1550,6 +1536,7 @@ git commit -m "feat(m3): replace NewJob placeholder with real preview/download f
 ### Task 15: Smoke test for NewJob page
 
 **Files:**
+
 - Create: `tests/renderer/NewJob.test.tsx`
 
 Three behaviors: URL input enables button after typing valid URL; preview success shows the card; clicking 다운로드 calls `downloadVideo`.
@@ -1557,11 +1544,11 @@ Three behaviors: URL input enables button after typing valid URL; preview succes
 - [ ] **Step 1: Write the test**
 
 ```tsx
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { NewJobPage } from '@renderer/pages/NewJob';
 import type { VideoMeta } from '@shared/youtube';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const baseMeta: VideoMeta = {
   id: 'dQw4w9WgXcQ',
@@ -1610,24 +1597,16 @@ describe('NewJobPage', () => {
     render(<NewJobPage />);
     const button = screen.getByRole('button', { name: '미리보기' });
     expect(button).toBeDisabled();
-    await user.type(
-      screen.getByRole('textbox'),
-      'https://youtu.be/dQw4w9WgXcQ',
-    );
+    await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
     expect(button).toBeEnabled();
   });
 
   it('shows the preview card after a successful fetch', async () => {
     const user = userEvent.setup();
     render(<NewJobPage />);
-    await user.type(
-      screen.getByRole('textbox'),
-      'https://youtu.be/dQw4w9WgXcQ',
-    );
+    await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
     await user.click(screen.getByRole('button', { name: '미리보기' }));
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Never Gonna Give You Up' })).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Never Gonna Give You Up' })).toBeInTheDocument());
     expect(screen.getByText(/Rick Astley/)).toBeInTheDocument();
     expect(screen.getByText(/3:33/)).toBeInTheDocument();
   });
@@ -1636,16 +1615,11 @@ describe('NewJobPage', () => {
     const calls = installApiMock();
     const user = userEvent.setup();
     render(<NewJobPage />);
-    await user.type(
-      screen.getByRole('textbox'),
-      'https://youtu.be/dQw4w9WgXcQ',
-    );
+    await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
     await user.click(screen.getByRole('button', { name: '미리보기' }));
     await waitFor(() => screen.getByRole('button', { name: '다운로드' }));
     await user.click(screen.getByRole('button', { name: '다운로드' }));
-    await waitFor(() =>
-      expect(calls.downloadVideo).toHaveBeenCalledWith('https://youtu.be/dQw4w9WgXcQ'),
-    );
+    await waitFor(() => expect(calls.downloadVideo).toHaveBeenCalledWith('https://youtu.be/dQw4w9WgXcQ'));
   });
 });
 ```
@@ -1672,6 +1646,7 @@ git commit -m "test(m3): smoke test for NewJob preview and download click"
 ### Task 16: Final verification + README + tag
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Run all DoD checks**

@@ -68,6 +68,7 @@ This is a manual prerequisite check — no commit. The plan deliberately does NO
 ### Task 2: Shared Render types
 
 **Files:**
+
 - Create: `src/shared/render.ts`
 
 - [ ] **Step 1: Create `src/shared/render.ts` with EXACTLY this content**
@@ -115,13 +116,7 @@ export const RenderProgressSchema = z.object({
 });
 export type RenderProgress = z.infer<typeof RenderProgressSchema>;
 
-export type RenderStatus =
-  | 'missing-prereq'
-  | 'idle'
-  | 'rendering'
-  | 'done'
-  | 'canceled'
-  | 'error';
+export type RenderStatus = 'missing-prereq' | 'idle' | 'rendering' | 'done' | 'canceled' | 'error';
 ```
 
 - [ ] **Step 2: Format + verify**
@@ -146,6 +141,7 @@ git commit -m "feat(m6): add shared Render result + progress zod schemas"
 ### Task 3: IPC contract extension
 
 **Files:**
+
 - Modify: `src/shared/ipc.ts`
 
 - [ ] **Step 1: Add the new types and methods**
@@ -199,6 +195,7 @@ git commit -m "feat(m6): extend AppApi with renderShorts/cancelRender/onRenderPr
 ### Task 4: FfmpegRunner infra (TDD)
 
 **Files:**
+
 - Create: `src/main/infra/FfmpegRunner.ts`
 - Create: `src/main/infra/FfmpegRunner.test.ts`
 
@@ -431,6 +428,7 @@ git commit -m "feat(m6): add FfmpegRunner with progress parsing and cancel"
 ### Task 5: RenderService orchestrator (TDD)
 
 **Files:**
+
 - Create: `src/main/services/RenderService.ts`
 - Create: `src/main/services/RenderService.test.ts`
 
@@ -441,9 +439,9 @@ git commit -m "feat(m6): add FfmpegRunner with progress parsing and cancel"
 Create `src/main/services/RenderService.test.ts` with EXACTLY this content:
 
 ```ts
+import type { Highlight } from '@shared/highlight';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Highlight } from '@shared/highlight';
 import { RenderService } from './RenderService';
 
 function fakeHighlight(i: number, start: number, end: number): Highlight {
@@ -451,7 +449,7 @@ function fakeHighlight(i: number, start: number, end: number): Highlight {
 }
 
 function fakeRunHandle() {
-  let progressCb: ((f: number) => void) = () => undefined;
+  let progressCb: (f: number) => void = () => undefined;
   let resolve: () => void = () => undefined;
   let reject: (err: Error) => void = () => undefined;
   const done = new Promise<void>((res, rej) => {
@@ -632,10 +630,9 @@ yarn test src/main/services/RenderService.test.ts
 - [ ] **Step 3: Implement `src/main/services/RenderService.ts` with EXACTLY this content**
 
 ```ts
-import { join } from 'node:path';
-
 import type { Highlight } from '@shared/highlight';
 import type { RenderClipResult, RenderProgress, RenderResult } from '@shared/render';
+import { join } from 'node:path';
 
 interface RunnerLike {
   run(opts: { args: readonly string[]; durationSec: number }): {
@@ -786,9 +783,11 @@ git commit -m "feat(m6): add RenderService with sequential queue, partial succes
 ### Task 6: Wire IPC handlers in main.ts
 
 **Files:**
+
 - Modify: `src/main/main.ts`
 
 The handler:
+
 1. Reads `<audioPath>.highlights.json` from disk; throws if missing.
 2. Validates with `HighlightSetSchema` (defensive — could be hand-edited).
 3. Computes `sourceStem = basename(audioPath, extname(audioPath))` (strip `.mp4` / `.webm`).
@@ -896,11 +895,11 @@ ipcMain.handle('render:cancel', () => {
 Update the existing `app.on('window-all-closed', ...)` block. Add the render cleanup BEFORE the `if (process.platform...)` line, alongside the existing extract cleanup:
 
 ```ts
-  renderProgressUnsub?.();
-  renderProgressUnsub = null;
-  renderService?.cancel();
-  renderService = null;
-  ffmpegRunner = null;
+renderProgressUnsub?.();
+renderProgressUnsub = null;
+renderService?.cancel();
+renderService = null;
+ffmpegRunner = null;
 ```
 
 - [ ] **Step 6: Format + typecheck**
@@ -924,6 +923,7 @@ git commit -m "feat(m6): wire render IPC + lazy RenderService + per-job output d
 ### Task 7: Update preload bridge + test stubs
 
 **Files:**
+
 - Modify: `src/main/preload.ts`
 - Modify: `tests/renderer/App.test.tsx`
 - Modify: `tests/renderer/Settings.test.tsx`
@@ -970,6 +970,7 @@ yarn lint && yarn typecheck && yarn test 2>&1 | tail -10
 ```
 
 Expected:
+
 - lint: 0 errors (1 known warning OK)
 - typecheck: 0 errors
 - test: all pass. Current count from end of M5 = 92; this task adds 0 new tests but unblocks the typecheck. Plus there are 2 new test files (FfmpegRunner=7, RenderService=6) that weren't yet in the count — total expected is 92 + 13 = 105.
@@ -986,6 +987,7 @@ git commit -m "feat(m6): expose renderShorts/cancelRender/onRenderProgress on wi
 ### Task 8: useRender hook
 
 **Files:**
+
 - Create: `src/renderer/hooks/useRender.ts`
 
 The hook owns the state machine. Unlike `useHighlights`, no proactive probe is needed — the prerequisite check (does the highlights.json exist on disk?) is folded into the IPC's error response and mapped to the `missing-prereq` state.
@@ -1088,6 +1090,7 @@ git commit -m "feat(m6): add useRender hook with state machine and abort-on-rese
 ### Task 9: RenderCard component
 
 **Files:**
+
 - Create: `src/renderer/components/newjob/RenderCard.tsx`
 
 Five visual states (`idle / rendering / done / canceled / error / missing-prereq`). The `done` state lists per-clip results (mark failed clips with a warning icon). Layout follows the same Tailwind patterns as `TranscribeCard` and `HighlightCard`.
@@ -1116,10 +1119,10 @@ type Props =
 
 export function RenderCard(props: Props) {
   return (
-    <section className="rounded-xl border border-hairline bg-canvas p-xxl shadow-1">
+    <section className="border-hairline bg-canvas p-xxl shadow-1 rounded-xl border">
       {props.status === 'idle' ? (
-        <div className="flex flex-col gap-md">
-          <h3 className="text-card-title font-semibold text-ink">숏츠 렌더링</h3>
+        <div className="gap-md flex flex-col">
+          <h3 className="text-card-title text-ink font-semibold">숏츠 렌더링</h3>
           <p className="text-body-sm text-slate">
             추출된 하이라이트 구간을 9:16 비율 mp4 파일로 변환합니다. (M6: 중앙 크롭, 자막 없음)
           </p>
@@ -1134,9 +1137,9 @@ export function RenderCard(props: Props) {
       ) : null}
 
       {props.status === 'rendering' ? (
-        <div className="flex flex-col gap-md">
-          <div className="flex items-baseline justify-between gap-md">
-            <h3 className="text-card-title font-semibold text-ink">
+        <div className="gap-md flex flex-col">
+          <div className="gap-md flex items-baseline justify-between">
+            <h3 className="text-card-title text-ink font-semibold">
               렌더링 중
               {props.progress
                 ? ` (클립 ${props.progress.clipIndex}/${props.progress.clipTotal} · ${formatPercent(props.progress)})`
@@ -1164,7 +1167,7 @@ export function RenderCard(props: Props) {
       ) : null}
 
       {props.status === 'done' ? (
-        <div className="flex flex-col gap-md">
+        <div className="gap-md flex flex-col">
           <h3 className="text-card-title text-success-text font-semibold">
             숏츠 {props.result.results.filter((r) => r.status === 'done').length}개 완성
             {props.result.results.some((r) => r.status !== 'done')
@@ -1173,19 +1176,14 @@ export function RenderCard(props: Props) {
           </h3>
           <ol className="gap-sm flex flex-col">
             {props.result.results.map((r: RenderClipResult) => (
-              <li
-                key={r.index}
-                className={`p-md rounded-lg ${r.status === 'done' ? 'bg-surface' : 'bg-warning-bg'}`}
-              >
+              <li key={r.index} className={`p-md rounded-lg ${r.status === 'done' ? 'bg-surface' : 'bg-warning-bg'}`}>
                 <p className="text-body-md text-ink font-semibold">
                   #{r.index} {r.title}{' '}
                   <span className="text-body-sm text-slate font-normal">
                     {r.status === 'done' ? '✓ 완료' : r.status === 'canceled' ? '⊘ 취소됨' : '✗ 실패'}
                   </span>
                 </p>
-                {r.outputPath ? (
-                  <p className="text-body-sm text-slate mt-xs break-all">{r.outputPath}</p>
-                ) : null}
+                {r.outputPath ? <p className="text-body-sm text-slate mt-xs break-all">{r.outputPath}</p> : null}
                 {r.error ? <p className="text-body-sm text-brand-coral mt-xs">{r.error}</p> : null}
               </li>
             ))}
@@ -1211,7 +1209,7 @@ export function RenderCard(props: Props) {
       ) : null}
 
       {props.status === 'canceled' ? (
-        <div className="flex flex-col gap-md">
+        <div className="gap-md flex flex-col">
           <h3 className="text-card-title text-ink font-semibold">렌더링 취소됨</h3>
           <button
             type="button"
@@ -1224,7 +1222,7 @@ export function RenderCard(props: Props) {
       ) : null}
 
       {props.status === 'missing-prereq' ? (
-        <div className="flex flex-col gap-md">
+        <div className="gap-md flex flex-col">
           <h3 className="text-card-title text-ink font-semibold">렌더링 준비 미완료</h3>
           <p className="text-body-sm text-slate">{props.error.message}</p>
           <button
@@ -1238,7 +1236,7 @@ export function RenderCard(props: Props) {
       ) : null}
 
       {props.status === 'error' ? (
-        <div className="flex flex-col gap-md">
+        <div className="gap-md flex flex-col">
           <h3 className="text-card-title text-brand-coral font-semibold">렌더링 실패</h3>
           <p className="text-body-sm text-slate break-all">{props.error.message}</p>
           <button
@@ -1274,6 +1272,7 @@ git commit -m "feat(m6): add RenderCard with idle/rendering/done/canceled/missin
 ### Task 10: Compose RenderCard into NewJob.tsx
 
 **Files:**
+
 - Modify: `src/renderer/pages/NewJob.tsx`
 
 After the `highlights.state.status === 'done'` block, render the RenderCard chain. It uses its own `useRender` hook. The audio source is the same as the upstream — `transcribe.state.audioPath`.
@@ -1302,24 +1301,8 @@ const renderShort = useRender();
 Find the existing `highlights.state.status === 'done'` JSX. Currently:
 
 ```tsx
-{highlights.state.status === 'done' ? (
-  <HighlightCard
-    status="done"
-    highlightsPath={highlights.state.highlightsPath}
-    highlightSet={highlights.state.highlightSet}
-    onOpenJson={() => {
-      if (highlights.state.status === 'done') void window.api.openPath(highlights.state.highlightsPath);
-    }}
-    onReset={() => highlights.reset()}
-  />
-) : null}
-```
-
-Wrap it in a fragment + add the RenderCard chain. Also: when highlights resets, also reset render.
-
-```tsx
-{highlights.state.status === 'done' ? (
-  <>
+{
+  highlights.state.status === 'done' ? (
     <HighlightCard
       status="done"
       highlightsPath={highlights.state.highlightsPath}
@@ -1327,51 +1310,67 @@ Wrap it in a fragment + add the RenderCard chain. Also: when highlights resets, 
       onOpenJson={() => {
         if (highlights.state.status === 'done') void window.api.openPath(highlights.state.highlightsPath);
       }}
-      onReset={() => {
-        highlights.reset();
-        renderShort.reset();
-      }}
+      onReset={() => highlights.reset()}
     />
-    {renderShort.state.status === 'idle' ? (
-      <RenderCard
-        status="idle"
-        onStart={() => {
-          if (transcribe.state.status === 'done') void renderShort.start(transcribe.state.audioPath);
-        }}
-      />
-    ) : null}
-    {renderShort.state.status === 'rendering' ? (
-      <RenderCard
-        status="rendering"
-        progress={renderShort.state.progress}
-        onCancel={() => void renderShort.cancel()}
-      />
-    ) : null}
-    {renderShort.state.status === 'done' ? (
-      <RenderCard
+  ) : null;
+}
+```
+
+Wrap it in a fragment + add the RenderCard chain. Also: when highlights resets, also reset render.
+
+```tsx
+{
+  highlights.state.status === 'done' ? (
+    <>
+      <HighlightCard
         status="done"
-        result={renderShort.state.result}
-        onRevealDir={() => {
-          if (renderShort.state.status === 'done') void window.api.revealInFolder(renderShort.state.result.outputDir);
+        highlightsPath={highlights.state.highlightsPath}
+        highlightSet={highlights.state.highlightSet}
+        onOpenJson={() => {
+          if (highlights.state.status === 'done') void window.api.openPath(highlights.state.highlightsPath);
         }}
-        onReset={() => renderShort.reset()}
+        onReset={() => {
+          highlights.reset();
+          renderShort.reset();
+        }}
       />
-    ) : null}
-    {renderShort.state.status === 'canceled' ? (
-      <RenderCard status="canceled" onReset={() => renderShort.reset()} />
-    ) : null}
-    {renderShort.state.status === 'missing-prereq' ? (
-      <RenderCard
-        status="missing-prereq"
-        error={renderShort.state.error}
-        onReset={() => renderShort.reset()}
-      />
-    ) : null}
-    {renderShort.state.status === 'error' ? (
-      <RenderCard status="error" error={renderShort.state.error} onReset={() => renderShort.reset()} />
-    ) : null}
-  </>
-) : null}
+      {renderShort.state.status === 'idle' ? (
+        <RenderCard
+          status="idle"
+          onStart={() => {
+            if (transcribe.state.status === 'done') void renderShort.start(transcribe.state.audioPath);
+          }}
+        />
+      ) : null}
+      {renderShort.state.status === 'rendering' ? (
+        <RenderCard
+          status="rendering"
+          progress={renderShort.state.progress}
+          onCancel={() => void renderShort.cancel()}
+        />
+      ) : null}
+      {renderShort.state.status === 'done' ? (
+        <RenderCard
+          status="done"
+          result={renderShort.state.result}
+          onRevealDir={() => {
+            if (renderShort.state.status === 'done') void window.api.revealInFolder(renderShort.state.result.outputDir);
+          }}
+          onReset={() => renderShort.reset()}
+        />
+      ) : null}
+      {renderShort.state.status === 'canceled' ? (
+        <RenderCard status="canceled" onReset={() => renderShort.reset()} />
+      ) : null}
+      {renderShort.state.status === 'missing-prereq' ? (
+        <RenderCard status="missing-prereq" error={renderShort.state.error} onReset={() => renderShort.reset()} />
+      ) : null}
+      {renderShort.state.status === 'error' ? (
+        <RenderCard status="error" error={renderShort.state.error} onReset={() => renderShort.reset()} />
+      ) : null}
+    </>
+  ) : null;
+}
 ```
 
 - [ ] **Step 4: Format + verify**
@@ -1395,6 +1394,7 @@ git commit -m "feat(m6): render RenderCard chain after highlights complete"
 ### Task 11: Smoke test for the render flow
 
 **Files:**
+
 - Modify: `tests/renderer/NewJob.test.tsx`
 
 Add ONE test: after the highlights flow lands in `done`, the "숏츠 만들기" button is visible and clicking it calls `renderShorts` with the correct audio path. Driving the highlights flow to `done` requires the test to walk preview → download → STT → 하이라이트 추출 → wait for `JSON 열기` (highlights done) → assert render button.
@@ -1472,6 +1472,7 @@ git commit -m "test(m6): smoke test for 숏츠 만들기 button after highlights
 ### Task 12: DoD verification + README + finalize branch
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Run all DoD checks**
@@ -1492,6 +1493,7 @@ yarn dev
 ```
 
 In the app:
+
 1. **Settings page** — confirm `paths.outputs` is set (defaults to `~/Documents` or similar; pick an easy-to-find folder if you want).
 2. **NewJob page** — paste a short YouTube URL, click 미리보기, 다운로드, wait for completion.
 3. Click **STT 시작**, wait for transcript completion.

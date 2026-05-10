@@ -65,6 +65,7 @@ tests/renderer/
 ### Task 1: Add better-sqlite3 dependency
 
 **Files:**
+
 - Modify: `package.json`
 - Modify: `yarn.lock`
 
@@ -106,6 +107,7 @@ git commit -m "chore(m9): add better-sqlite3 + @types/better-sqlite3"
 ### Task 2: Shared History zod schemas
 
 **Files:**
+
 - Create: `src/shared/history.ts`
 
 - [ ] **Step 1: Create `src/shared/history.ts` with EXACTLY this content**
@@ -210,6 +212,7 @@ git commit -m "feat(m9): add shared History zod schemas (Job, Short, JobSummary,
 ### Task 3: HistoryRepo (TDD with `:memory:` DB)
 
 **Files:**
+
 - Create: `src/main/infra/HistoryRepo.ts`
 - Create: `src/main/infra/HistoryRepo.test.ts`
 
@@ -220,10 +223,10 @@ git commit -m "feat(m9): add shared History zod schemas (Job, Short, JobSummary,
 Create `src/main/infra/HistoryRepo.test.ts` with EXACTLY this content:
 
 ```ts
+import type { Job, Short } from '@shared/history';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { Job, Short } from '@shared/history';
 import { HistoryRepo } from './HistoryRepo';
 
 function fakeJob(overrides: Partial<Job> = {}): Job {
@@ -291,10 +294,7 @@ describe('HistoryRepo', () => {
 
   it('insertShorts persists shorts and getShortsByJob returns them in idx order', () => {
     repo.insertJob(fakeJob());
-    repo.insertShorts([
-      fakeShort({ id: 's2', idx: 2, title: 'B' }),
-      fakeShort({ id: 's1', idx: 1, title: 'A' }),
-    ]);
+    repo.insertShorts([fakeShort({ id: 's2', idx: 2, title: 'B' }), fakeShort({ id: 's1', idx: 1, title: 'A' })]);
     const got = repo.getShortsByJob('j1');
     expect(got.map((s) => s.idx)).toEqual([1, 2]);
     expect(got[0]!.title).toBe('A');
@@ -378,9 +378,8 @@ Expected: cannot find HistoryRepo module.
 - [ ] **Step 3: Implement `src/main/infra/HistoryRepo.ts` with EXACTLY this content**
 
 ```ts
+import type { Job, JobStatus, JobSummary, Short } from '@shared/history';
 import type Database from 'better-sqlite3';
-
-import type { Job, JobSummary, JobStatus, Short } from '@shared/history';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS jobs (
@@ -550,9 +549,7 @@ export class HistoryRepo {
   }
 
   getShortsByJob(jobId: string): Short[] {
-    const rows = this._db
-      .prepare('SELECT * FROM shorts WHERE job_id = ? ORDER BY idx ASC')
-      .all(jobId) as ShortRow[];
+    const rows = this._db.prepare('SELECT * FROM shorts WHERE job_id = ? ORDER BY idx ASC').all(jobId) as ShortRow[];
     return rows.map(rowToShort);
   }
 
@@ -640,6 +637,7 @@ yarn test src/main/infra/HistoryRepo.test.ts
 ```
 
 If a test fails:
+
 - "FTS5 search" — verify `better-sqlite3`'s SQLite was compiled with FTS5 (Task 1 step 2). If not, escalate.
 - "deleteJob CASCADE" — `pragma foreign_keys = ON` must run before any DML. The constructor sets it; verify.
 
@@ -656,6 +654,7 @@ git commit -m "feat(m9): add HistoryRepo with sqlite schema, FTS5 search, sort, 
 ### Task 4: ThumbnailService (TDD)
 
 **Files:**
+
 - Create: `src/main/services/ThumbnailService.ts`
 - Create: `src/main/services/ThumbnailService.test.ts`
 
@@ -749,11 +748,7 @@ export interface ExtractOptions {
 export class ThumbnailService {
   constructor(private readonly runner: RunnerLike) {}
 
-  async extractMidpoint(
-    videoPath: string,
-    outPath: string,
-    opts: ExtractOptions,
-  ): Promise<string | null> {
+  async extractMidpoint(videoPath: string, outPath: string, opts: ExtractOptions): Promise<string | null> {
     const midpoint = (opts.startSec + opts.endSec) / 2;
     const args = ['-y', '-ss', String(midpoint), '-i', videoPath, '-vframes', '1', outPath];
     const handle = this.runner.run({ args, durationSec: 1 });
@@ -787,6 +782,7 @@ git commit -m "feat(m9): add ThumbnailService for ffmpeg single-frame extraction
 ### Task 5: HistoryService (TDD)
 
 **Files:**
+
 - Create: `src/main/services/HistoryService.ts`
 - Create: `src/main/services/HistoryService.test.ts`
 
@@ -797,11 +793,10 @@ The single entry point for "save a finished render to history." Takes the inputs
 Create `src/main/services/HistoryService.test.ts` with EXACTLY this content:
 
 ```ts
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-
 import type { Highlight, HighlightSet } from '@shared/highlight';
 import type { RenderResult } from '@shared/render';
 import type { VideoMeta } from '@shared/youtube';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HistoryService } from './HistoryService';
 
@@ -830,7 +825,9 @@ function fakeHighlightSet(highlights: Highlight[]): HighlightSet {
   };
 }
 
-function fakeRenderResult(specs: { idx: number; status: 'done' | 'failed' | 'canceled'; outputPath?: string }[]): RenderResult {
+function fakeRenderResult(
+  specs: { idx: number; status: 'done' | 'failed' | 'canceled'; outputPath?: string }[],
+): RenderResult {
   return {
     outputDir: '/tmp/out/My Talk',
     results: specs.map((s) => ({
@@ -993,14 +990,13 @@ yarn test src/main/services/HistoryService.test.ts
 - [ ] **Step 3: Implement `src/main/services/HistoryService.ts` with EXACTLY this content**
 
 ```ts
-import { randomUUID } from 'node:crypto';
-import { promises as fsPromises } from 'node:fs';
-import { join } from 'node:path';
-
 import type { HighlightSet } from '@shared/highlight';
 import type { Job, JobStatus, Short } from '@shared/history';
 import type { RenderResult } from '@shared/render';
 import type { VideoMeta } from '@shared/youtube';
+import { randomUUID } from 'node:crypto';
+import { promises as fsPromises } from 'node:fs';
+import { join } from 'node:path';
 
 interface RepoLike {
   insertJob(job: Job): void;
@@ -1149,6 +1145,7 @@ git commit -m "feat(m9): add HistoryService orchestrating thumbnails + repo writ
 ### Task 6: Write `<audioPath>.meta.json` sidecar in main.ts download handler
 
 **Files:**
+
 - Modify: `src/main/main.ts`
 
 The render-time history record needs the original `VideoMeta` (URL, title, channel, etc.) but main.ts currently discards it after the download IPC returns. Persist it as a sibling JSON.
@@ -1200,6 +1197,7 @@ git commit -m "feat(m9): write <audioPath>.meta.json sidecar after download for 
 ### Task 7: IPC contract extension
 
 **Files:**
+
 - Modify: `src/shared/ipc.ts`
 
 - [ ] **Step 1: Add the imports + 3 new methods**
@@ -1243,6 +1241,7 @@ git commit -m "feat(m9): extend AppApi with historyList/historyGetDetail/history
 ### Task 8: Wire IPC handlers + lazy HistoryRepo/Service in main.ts
 
 **Files:**
+
 - Modify: `src/main/main.ts`
 - Modify: `src/main/preload.ts`
 - Modify: `tests/renderer/App.test.tsx`
@@ -1254,9 +1253,8 @@ This is the M9 integration glue: lazy-init HistoryRepo + HistoryService at first
 - [ ] **Step 1: Add imports to main.ts**
 
 ```ts
+import { type HistoryListQuery, HistoryListQuerySchema } from '@shared/history';
 import Database from 'better-sqlite3';
-
-import { HistoryListQuerySchema, type HistoryListQuery } from '@shared/history';
 
 import { HistoryRepo } from './infra/HistoryRepo';
 import { HistoryService } from './services/HistoryService';
@@ -1460,6 +1458,7 @@ git commit -m "feat(m9): wire HistoryRepo + HistoryService + 3 IPC handlers; rec
 ### Task 9: useHistory hook
 
 **Files:**
+
 - Create: `src/renderer/hooks/useHistory.ts`
 
 State machine for the history page: query state, fetch on query change, loading/error/done.
@@ -1531,6 +1530,7 @@ git commit -m "feat(m9): add useHistory hook with query state + refresh"
 ### Task 10: HistoryListView + HistoryGridView components
 
 **Files:**
+
 - Create: `src/renderer/components/history/HistoryListView.tsx`
 - Create: `src/renderer/components/history/HistoryGridView.tsx`
 
@@ -1673,6 +1673,7 @@ git commit -m "feat(m9): add HistoryListView and HistoryGridView presentation co
 ### Task 11: JobDetailDrawer component
 
 **Files:**
+
 - Create: `src/renderer/components/history/JobDetailDrawer.tsx`
 
 Side drawer shown when a row is clicked. Loads `JobDetail` via IPC, shows job header + per-short list + open-folder button.
@@ -1714,12 +1715,7 @@ export function JobDetailDrawer({ jobId, onClose, onDelete }: Props) {
       <div className="p-xl gap-md flex flex-col">
         <div className="flex items-start justify-between">
           <h2 className="text-card-title text-ink font-semibold">{detail?.job.title ?? '로딩 중...'}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-body-md text-slate hover:text-ink"
-            aria-label="Close"
-          >
+          <button type="button" onClick={onClose} className="text-body-md text-slate hover:text-ink" aria-label="Close">
             ×
           </button>
         </div>
@@ -1790,6 +1786,7 @@ git commit -m "feat(m9): add JobDetailDrawer with per-short list and reveal/dele
 ### Task 12: Wire HistoryPage with toolbar + view + drawer
 
 **Files:**
+
 - Modify: `src/renderer/pages/History.tsx`
 
 Replaces the M1 stub with the working page.
@@ -1875,9 +1872,7 @@ export function HistoryPage() {
       </div>
 
       {state.status === 'loading' ? <p className="text-body-md text-slate">로딩 중...</p> : null}
-      {state.status === 'error' ? (
-        <p className="text-body-md text-brand-coral">오류: {state.error.message}</p>
-      ) : null}
+      {state.status === 'error' ? <p className="text-body-md text-brand-coral">오류: {state.error.message}</p> : null}
       {state.status === 'done' ? (
         view === 'list' ? (
           <HistoryListView jobs={state.jobs} onRowClick={setActiveJobId} />
@@ -1921,6 +1916,7 @@ git commit -m "feat(m9): wire HistoryPage with toolbar, list/grid views, and det
 ### Task 13: Smoke test for HistoryPage
 
 **Files:**
+
 - Create: `tests/renderer/History.test.tsx`
 
 One test: page loads, calls `historyList`, renders the returned jobs in list view.
@@ -2017,9 +2013,7 @@ describe('HistoryPage', () => {
     await waitFor(() => expect(calls.historyList).toHaveBeenCalled());
     const search = screen.getByPlaceholderText(/제목, 채널/);
     await user.type(search, 'AI');
-    await waitFor(() =>
-      expect(calls.historyList).toHaveBeenCalledWith(expect.objectContaining({ search: 'AI' })),
-    );
+    await waitFor(() => expect(calls.historyList).toHaveBeenCalledWith(expect.objectContaining({ search: 'AI' })));
   });
 });
 ```
@@ -2053,6 +2047,7 @@ git commit -m "test(m9): smoke tests for HistoryPage list view + view toggle + s
 ### Task 14: DoD verification + README + finalize branch
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Run all DoD checks**
@@ -2072,6 +2067,7 @@ yarn dev
 ```
 
 In the app:
+
 1. Run a fresh pipeline (preview → download → STT → highlights → render). Confirm shorts are produced.
 2. Click 히스토리 in the sidebar — the new render should appear at top.
 3. Type a search term matching the title — list should filter.

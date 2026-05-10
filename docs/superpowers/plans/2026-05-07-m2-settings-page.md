@@ -53,6 +53,7 @@ tests/
 ```
 
 **Decomposition rationale:**
+
 - `shared/settings.ts` is the single source of truth: schema + defaults + types, imported by main and renderer.
 - Each section component (`ApiModelSection`, etc.) owns its own subset of the settings tree and emits whole-section patches up to the page; this keeps each file small and testable.
 - `SettingsCard` and `SettingsRow` are reusable layout primitives so future settings additions don't reinvent chrome.
@@ -66,6 +67,7 @@ tests/
 ### Task 1: Settings schema + defaults (shared)
 
 **Files:**
+
 - Create: `src/shared/settings.ts`
 
 This file is consumed by both main and renderer. It defines the schema once.
@@ -187,6 +189,7 @@ git commit -m "feat(m2): add Settings schema and defaults in shared/settings.ts"
 ### Task 2: Install M2 dependencies
 
 **Files:**
+
 - Modify: `package.json` + `yarn.lock`
 
 - [ ] **Step 1: Install runtime deps**
@@ -225,6 +228,7 @@ git commit -m "chore(m2): add electron-store and zod dependencies"
 ### Task 3: IPC contract extension (shared)
 
 **Files:**
+
 - Modify: `src/shared/ipc.ts`
 
 Extend `AppApi` with all M2 methods. Both main (handler signatures) and renderer (hook implementations) will be type-checked against this single contract.
@@ -297,6 +301,7 @@ git commit -m "feat(m2): extend AppApi with settings, secure storage, and folder
 ### Task 4: SettingsStore (electron-store wrapper) — TDD
 
 **Files:**
+
 - Create: `src/main/infra/SettingsStore.ts`
 - Create: `src/main/infra/SettingsStore.test.ts`
 
@@ -307,9 +312,10 @@ git commit -m "feat(m2): extend AppApi with settings, secure storage, and folder
 Create `src/main/infra/SettingsStore.test.ts`:
 
 ```ts
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { SettingsStore } from './SettingsStore';
 import type { Settings } from '@shared/settings';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { SettingsStore } from './SettingsStore';
 
 // In-memory mock for electron-store's get/set/clear surface.
 class FakeStore {
@@ -361,9 +367,7 @@ describe('SettingsStore', () => {
   });
 
   it('rejects a patch that violates the schema', () => {
-    expect(() =>
-      store.update({ shorts: { defaultCount: 99, minSec: 30, maxSec: 90 } } as Partial<Settings>),
-    ).toThrow();
+    expect(() => store.update({ shorts: { defaultCount: 99, minSec: 30, maxSec: 90 } } as Partial<Settings>)).toThrow();
   });
 
   it('reset() clears persisted data and returns regenerated defaults', () => {
@@ -388,8 +392,8 @@ Expected: FAIL with "Cannot find module './SettingsStore'" or similar.
 Create `src/main/infra/SettingsStore.ts`:
 
 ```ts
+import { DEFAULT_SETTINGS_TEMPLATE, type Settings, SettingsSchema } from '@shared/settings';
 import type Store from 'electron-store';
-import { DEFAULT_SETTINGS_TEMPLATE, SettingsSchema, type Settings } from '@shared/settings';
 
 /**
  * Standard OS paths needed to resolve default folders. Injected by the caller
@@ -489,6 +493,7 @@ git commit -m "feat(m2): add SettingsStore with schema validation and defaults"
 ### Task 5: SecureStorage (safeStorage wrapper) — TDD
 
 **Files:**
+
 - Create: `src/main/infra/SecureStorage.ts`
 - Create: `src/main/infra/SecureStorage.test.ts`
 
@@ -499,7 +504,8 @@ Encrypts the API key with `safeStorage` and writes the ciphertext to a file in `
 Create `src/main/infra/SecureStorage.test.ts`:
 
 ```ts
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { SecureStorage } from './SecureStorage';
 
 class FakeFs {
@@ -677,6 +683,7 @@ git commit -m "feat(m2): add SecureStorage wrapping Electron safeStorage"
 ### Task 6: Wire IPC handlers in main.ts
 
 **Files:**
+
 - Modify: `src/main/main.ts`
 
 Instantiate the two stores at app startup, register the new IPC handlers, and add the folder picker dialog.
@@ -688,14 +695,15 @@ Apply the following changes:
 a. **Add imports** at the top, after the existing electron import:
 
 ```ts
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, session, shell } from 'electron';
+import type { Settings } from '@shared/settings';
+import { BrowserWindow, app, dialog, ipcMain, safeStorage, session, shell } from 'electron';
 import Store from 'electron-store';
 import { promises as fsPromises } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SettingsStore } from './infra/SettingsStore';
+
 import { SecureStorage } from './infra/SecureStorage';
-import type { Settings } from '@shared/settings';
+import { SettingsStore } from './infra/SettingsStore';
 ```
 
 (Remove the standalone `import { app, BrowserWindow, ipcMain, session, shell } from 'electron';` line and replace with the augmented one above.)
@@ -719,11 +727,7 @@ void app.whenReady().then(() => {
     downloads: app.getPath('downloads'),
     documents: app.getPath('documents'),
   });
-  secureStorage = new SecureStorage(
-    join(app.getPath('userData'), 'secrets.bin'),
-    safeStorage,
-    fsPromises,
-  );
+  secureStorage = new SecureStorage(join(app.getPath('userData'), 'secrets.bin'), safeStorage, fsPromises);
 
   // IPC handlers
   ipcMain.handle('app:getVersion', () => app.getVersion());
@@ -736,18 +740,15 @@ void app.whenReady().then(() => {
   ipcMain.handle('secure:setKey', (_e, key: string) => secureStorage.setKey(key));
   ipcMain.handle('secure:clearKey', () => secureStorage.clearKey());
 
-  ipcMain.handle(
-    'dialog:pickFolder',
-    async (_e, opts: { title?: string; defaultPath?: string }) => {
-      const result = await dialog.showOpenDialog({
-        title: opts.title,
-        defaultPath: opts.defaultPath,
-        properties: ['openDirectory', 'createDirectory'],
-      });
-      if (result.canceled || result.filePaths.length === 0) return null;
-      return result.filePaths[0];
-    },
-  );
+  ipcMain.handle('dialog:pickFolder', async (_e, opts: { title?: string; defaultPath?: string }) => {
+    const result = await dialog.showOpenDialog({
+      title: opts.title,
+      defaultPath: opts.defaultPath,
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
 
   createMainWindow();
 
@@ -785,6 +786,7 @@ git commit -m "feat(m2): wire SettingsStore, SecureStorage, and folder picker IP
 ### Task 7: Update preload bridge
 
 **Files:**
+
 - Modify: `src/main/preload.ts`
 
 Expose the new methods on `window.api`.
@@ -836,6 +838,7 @@ git commit -m "feat(m2): expose settings, secure storage, and folder picker on w
 ### Task 8: useSettings hook
 
 **Files:**
+
 - Create: `src/renderer/hooks/useSettings.ts`
 
 A thin wrapper that loads settings on mount and provides an updater that re-syncs from main on success.
@@ -844,6 +847,7 @@ A thin wrapper that loads settings on mount and provides an updater that re-sync
 
 ```ts
 import { useCallback, useEffect, useState } from 'react';
+
 import type { Settings } from '@shared/settings';
 
 export type UseSettings = {
@@ -910,6 +914,7 @@ git commit -m "feat(m2): add useSettings hook for renderer"
 ### Task 9: useApiKey hook
 
 **Files:**
+
 - Create: `src/renderer/hooks/useApiKey.ts`
 
 The renderer never sees the plaintext key after it's set — only `hasApiKey` boolean state, plus setters.
@@ -971,6 +976,7 @@ git commit -m "feat(m2): add useApiKey hook for renderer"
 ### Task 10: SettingsCard + SettingsRow shared components
 
 **Files:**
+
 - Create: `src/renderer/components/settings/SettingsCard.tsx`
 - Create: `src/renderer/components/settings/SettingsRow.tsx`
 
@@ -991,12 +997,12 @@ export function SettingsCard({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-hairline bg-canvas p-xxl shadow-1">
+    <section className="border-hairline bg-canvas p-xxl shadow-1 rounded-xl border">
       <header className="mb-xl">
-        <h2 className="text-card-title font-semibold text-ink">{title}</h2>
+        <h2 className="text-card-title text-ink font-semibold">{title}</h2>
         {description ? <p className="mt-xxs text-body-sm text-slate">{description}</p> : null}
       </header>
-      <div className="flex flex-col gap-lg">{children}</div>
+      <div className="gap-lg flex flex-col">{children}</div>
     </section>
   );
 }
@@ -1007,17 +1013,9 @@ export function SettingsCard({
 ```tsx
 import type { ReactNode } from 'react';
 
-export function SettingsRow({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: ReactNode;
-}) {
+export function SettingsRow({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
-    <label className="flex flex-col gap-xs">
+    <label className="gap-xs flex flex-col">
       <span className="text-body-sm-medium text-ink">{label}</span>
       {hint ? <span className="text-caption text-stone">{hint}</span> : null}
       <div>{children}</div>
@@ -1047,6 +1045,7 @@ git commit -m "feat(m2): add SettingsCard and SettingsRow layout primitives"
 ### Task 11: PathInput component
 
 **Files:**
+
 - Create: `src/renderer/components/settings/PathInput.tsx`
 
 Text input + "찾아보기" button. Clicking the button opens the OS folder picker via IPC.
@@ -1078,19 +1077,19 @@ export function PathInput({
   }
 
   return (
-    <div className="flex gap-sm">
+    <div className="gap-sm flex">
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         spellCheck={false}
-        className="h-10 flex-1 rounded-md border border-hairline bg-canvas px-md text-body-sm text-ink focus:border-brand-blue-deep focus:outline-none"
+        className="border-hairline bg-canvas px-md text-body-sm text-ink focus:border-brand-blue-deep h-10 flex-1 rounded-md border focus:outline-none"
       />
       <button
         type="button"
         onClick={browse}
         disabled={busy}
-        className="h-10 rounded-full border border-ink bg-transparent px-xl text-button-md font-semibold text-ink disabled:opacity-50"
+        className="border-ink px-xl text-button-md text-ink h-10 rounded-full border bg-transparent font-semibold disabled:opacity-50"
       >
         찾아보기
       </button>
@@ -1118,6 +1117,7 @@ git commit -m "feat(m2): add PathInput with folder dialog trigger"
 ### Task 12: PasswordInput component
 
 **Files:**
+
 - Create: `src/renderer/components/settings/PasswordInput.tsx`
 
 Password-style input with a show/hide toggle. Used for the API key entry.
@@ -1138,7 +1138,7 @@ export function PasswordInput({
 }) {
   const [shown, setShown] = useState(false);
   return (
-    <div className="flex gap-sm">
+    <div className="gap-sm flex">
       <input
         type={shown ? 'text' : 'password'}
         value={value}
@@ -1146,12 +1146,12 @@ export function PasswordInput({
         placeholder={placeholder}
         spellCheck={false}
         autoComplete="off"
-        className="h-10 flex-1 rounded-md border border-hairline bg-canvas px-md text-body-sm text-ink focus:border-brand-blue-deep focus:outline-none"
+        className="border-hairline bg-canvas px-md text-body-sm text-ink focus:border-brand-blue-deep h-10 flex-1 rounded-md border focus:outline-none"
       />
       <button
         type="button"
         onClick={() => setShown((v) => !v)}
-        className="h-10 rounded-full border border-ink bg-transparent px-xl text-button-md font-semibold text-ink"
+        className="border-ink px-xl text-button-md text-ink h-10 rounded-full border bg-transparent font-semibold"
       >
         {shown ? '숨기기' : '표시'}
       </button>
@@ -1179,6 +1179,7 @@ git commit -m "feat(m2): add PasswordInput with show/hide toggle"
 ### Task 13: ApiModelSection
 
 **Files:**
+
 - Create: `src/renderer/components/settings/ApiModelSection.tsx`
 
 Combines API key (via useApiKey) + LLM model text field (via useSettings).
@@ -1187,7 +1188,9 @@ Combines API key (via useApiKey) + LLM model text field (via useSettings).
 
 ```tsx
 import { useState } from 'react';
+
 import type { Settings } from '@shared/settings';
+
 import { useApiKey } from '../../hooks/useApiKey';
 import { PasswordInput } from './PasswordInput';
 import { SettingsCard } from './SettingsCard';
@@ -1210,10 +1213,7 @@ export function ApiModelSection({
   }
 
   return (
-    <SettingsCard
-      title="API & 모델"
-      description="OpenRouter 키와 사용할 LLM 모델을 설정하세요."
-    >
+    <SettingsCard title="API & 모델" description="OpenRouter 키와 사용할 LLM 모델을 설정하세요.">
       <SettingsRow
         label="OpenRouter API 키"
         hint={
@@ -1224,14 +1224,14 @@ export function ApiModelSection({
               : '아직 키가 저장되지 않았습니다.'
         }
       >
-        <div className="flex flex-col gap-sm">
+        <div className="gap-sm flex flex-col">
           <PasswordInput value={draft} onChange={setDraft} placeholder="sk-or-v1-..." />
-          <div className="flex gap-sm">
+          <div className="gap-sm flex">
             <button
               type="button"
               onClick={saveKey}
               disabled={!draft}
-              className="h-10 rounded-full bg-primary px-xl text-button-md font-semibold text-on-primary disabled:opacity-50"
+              className="bg-primary px-xl text-button-md text-on-primary h-10 rounded-full font-semibold disabled:opacity-50"
             >
               저장
             </button>
@@ -1239,7 +1239,7 @@ export function ApiModelSection({
               <button
                 type="button"
                 onClick={() => clearKey()}
-                className="h-10 rounded-full border border-ink bg-transparent px-xl text-button-md font-semibold text-ink"
+                className="border-ink px-xl text-button-md text-ink h-10 rounded-full border bg-transparent font-semibold"
               >
                 삭제
               </button>
@@ -1248,16 +1248,13 @@ export function ApiModelSection({
         </div>
       </SettingsRow>
 
-      <SettingsRow
-        label="LLM 모델"
-        hint="예: anthropic/claude-sonnet-4.5, openai/gpt-4.1, google/gemini-2.5-pro"
-      >
+      <SettingsRow label="LLM 모델" hint="예: anthropic/claude-sonnet-4.5, openai/gpt-4.1, google/gemini-2.5-pro">
         <input
           type="text"
           value={llm.model}
           onChange={(e) => onLlmChange({ ...llm, model: e.target.value })}
           spellCheck={false}
-          className="h-10 w-full rounded-md border border-hairline bg-canvas px-md text-body-sm text-ink focus:border-brand-blue-deep focus:outline-none"
+          className="border-hairline bg-canvas px-md text-body-sm text-ink focus:border-brand-blue-deep h-10 w-full rounded-md border focus:outline-none"
         />
       </SettingsRow>
     </SettingsCard>
@@ -1284,6 +1281,7 @@ git commit -m "feat(m2): add ApiModelSection (API key + LLM model)"
 ### Task 14: PathsSection
 
 **Files:**
+
 - Create: `src/renderer/components/settings/PathsSection.tsx`
 
 Three folder pickers.
@@ -1292,6 +1290,7 @@ Three folder pickers.
 
 ```tsx
 import type { Settings } from '@shared/settings';
+
 import { PathInput } from './PathInput';
 import { SettingsCard } from './SettingsCard';
 import { SettingsRow } from './SettingsRow';
@@ -1304,10 +1303,7 @@ export function PathsSection({
   onChange: (next: Settings['paths']) => void;
 }) {
   return (
-    <SettingsCard
-      title="경로"
-      description="다운로드한 원본·작업 파일·완성된 숏츠가 저장될 위치입니다."
-    >
+    <SettingsCard title="경로" description="다운로드한 원본·작업 파일·완성된 숏츠가 저장될 위치입니다.">
       <SettingsRow label="다운로드 폴더" hint="YouTube에서 받아온 원본 영상이 저장됩니다.">
         <PathInput
           value={paths.downloads}
@@ -1353,6 +1349,7 @@ git commit -m "feat(m2): add PathsSection (downloads/workspace/outputs)"
 ### Task 15: WhisperSection
 
 **Files:**
+
 - Create: `src/renderer/components/settings/WhisperSection.tsx`
 
 Three dropdowns: model, language, device.
@@ -1361,6 +1358,7 @@ Three dropdowns: model, language, device.
 
 ```tsx
 import type { Settings, WhisperDevice, WhisperLanguage, WhisperModel } from '@shared/settings';
+
 import { SettingsCard } from './SettingsCard';
 import { SettingsRow } from './SettingsRow';
 
@@ -1462,6 +1460,7 @@ git commit -m "feat(m2): add WhisperSection (model/language/device)"
 ### Task 16: SubtitlesSection
 
 **Files:**
+
 - Create: `src/renderer/components/settings/SubtitlesSection.tsx`
 
 Toggle, font family, font size, fill/outline colors, position.
@@ -1470,6 +1469,7 @@ Toggle, font family, font size, fill/outline colors, position.
 
 ```tsx
 import type { Settings, SubtitlePosition } from '@shared/settings';
+
 import { SettingsCard } from './SettingsCard';
 import { SettingsRow } from './SettingsRow';
 
@@ -1491,7 +1491,7 @@ export function SubtitlesSection({
   return (
     <SettingsCard title="자막 스타일" description="숏츠에 구워넣을 자막 모양을 설정하세요.">
       <SettingsRow label="자막 사용">
-        <label className="flex items-center gap-xs">
+        <label className="gap-xs flex items-center">
           <input
             type="checkbox"
             checked={subtitles.enabled}
@@ -1521,7 +1521,7 @@ export function SubtitlesSection({
       <SettingsRow label="채움 색상">
         <input
           type="color"
-          className="h-10 w-20 rounded-md border border-hairline bg-canvas"
+          className="border-hairline bg-canvas h-10 w-20 rounded-md border"
           value={subtitles.fillColor}
           onChange={(e) => onChange({ ...subtitles, fillColor: e.target.value.toUpperCase() })}
         />
@@ -1529,20 +1529,16 @@ export function SubtitlesSection({
       <SettingsRow label="외곽선 색상">
         <input
           type="color"
-          className="h-10 w-20 rounded-md border border-hairline bg-canvas"
+          className="border-hairline bg-canvas h-10 w-20 rounded-md border"
           value={subtitles.outlineColor}
-          onChange={(e) =>
-            onChange({ ...subtitles, outlineColor: e.target.value.toUpperCase() })
-          }
+          onChange={(e) => onChange({ ...subtitles, outlineColor: e.target.value.toUpperCase() })}
         />
       </SettingsRow>
       <SettingsRow label="위치">
         <select
           className={INPUT_CLASS}
           value={subtitles.position}
-          onChange={(e) =>
-            onChange({ ...subtitles, position: e.target.value as SubtitlePosition })
-          }
+          onChange={(e) => onChange({ ...subtitles, position: e.target.value as SubtitlePosition })}
         >
           {POSITIONS.map((p) => (
             <option key={p.value} value={p.value}>
@@ -1575,6 +1571,7 @@ git commit -m "feat(m2): add SubtitlesSection (style/colors/position)"
 ### Task 17: OutputSection
 
 **Files:**
+
 - Create: `src/renderer/components/settings/OutputSection.tsx`
 
 Default count + min/max length.
@@ -1583,6 +1580,7 @@ Default count + min/max length.
 
 ```tsx
 import type { Settings } from '@shared/settings';
+
 import { SettingsCard } from './SettingsCard';
 import { SettingsRow } from './SettingsRow';
 
@@ -1597,10 +1595,7 @@ export function OutputSection({
   onChange: (next: Settings['shorts']) => void;
 }) {
   return (
-    <SettingsCard
-      title="출력 옵션"
-      description="새 작업을 시작할 때 기본으로 사용할 숏츠 개수와 길이 범위입니다."
-    >
+    <SettingsCard title="출력 옵션" description="새 작업을 시작할 때 기본으로 사용할 숏츠 개수와 길이 범위입니다.">
       <SettingsRow label="기본 숏츠 개수" hint="1 ~ 10 사이">
         <input
           type="number"
@@ -1655,6 +1650,7 @@ git commit -m "feat(m2): add OutputSection (count/length range)"
 ### Task 18: Compose Settings.tsx page
 
 **Files:**
+
 - Modify: `src/renderer/pages/Settings.tsx`
 
 Replace the placeholder with the real composition. Each section emits whole-section patches; the page calls `update` once per change.
@@ -1683,42 +1679,25 @@ export function SettingsPage() {
   if (error || !settings) {
     return (
       <section className="p-section">
-        <p className="text-body-md text-brand-coral">
-          설정을 불러올 수 없습니다: {error?.message ?? 'unknown error'}
-        </p>
+        <p className="text-body-md text-brand-coral">설정을 불러올 수 없습니다: {error?.message ?? 'unknown error'}</p>
       </section>
     );
   }
 
   return (
-    <section className="flex flex-col gap-xl p-section">
+    <section className="gap-xl p-section flex flex-col">
       <header>
-        <h1 className="text-heading-md font-semibold text-ink">설정</h1>
+        <h1 className="text-heading-md text-ink font-semibold">설정</h1>
         <p className="mt-md text-body-md text-slate">
           API 키, 경로, 모델, 자막 등을 한 번 설정해 두면 새 작업마다 기본값으로 쓰입니다.
         </p>
       </header>
 
-      <ApiModelSection
-        llm={settings.llm}
-        onLlmChange={(llm) => void update({ llm })}
-      />
-      <PathsSection
-        paths={settings.paths}
-        onChange={(paths) => void update({ paths })}
-      />
-      <WhisperSection
-        whisper={settings.whisper}
-        onChange={(whisper) => void update({ whisper })}
-      />
-      <SubtitlesSection
-        subtitles={settings.subtitles}
-        onChange={(subtitles) => void update({ subtitles })}
-      />
-      <OutputSection
-        shorts={settings.shorts}
-        onChange={(shorts) => void update({ shorts })}
-      />
+      <ApiModelSection llm={settings.llm} onLlmChange={(llm) => void update({ llm })} />
+      <PathsSection paths={settings.paths} onChange={(paths) => void update({ paths })} />
+      <WhisperSection whisper={settings.whisper} onChange={(whisper) => void update({ whisper })} />
+      <SubtitlesSection subtitles={settings.subtitles} onChange={(subtitles) => void update({ subtitles })} />
+      <OutputSection shorts={settings.shorts} onChange={(shorts) => void update({ shorts })} />
     </section>
   );
 }
@@ -1745,6 +1724,7 @@ git commit -m "feat(m2): replace Settings placeholder with 5-section page"
 ### Task 19: Smoke test for Settings page
 
 **Files:**
+
 - Create: `tests/renderer/Settings.test.tsx`
 
 Render the page with a mocked `window.api`, verify all 5 cards render, exercise one save flow.
@@ -1754,11 +1734,11 @@ Render the page with a mocked `window.api`, verify all 5 cards render, exercise 
 Create `tests/renderer/Settings.test.tsx`:
 
 ```tsx
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { SettingsPage } from '@renderer/pages/Settings';
 import type { Settings } from '@shared/settings';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const baseSettings: Settings = {
   paths: {
@@ -1872,6 +1852,7 @@ git commit -m "test(m2): smoke test for SettingsPage render and save flow"
 ### Task 20: Final verification + README + tag
 
 **Files:**
+
 - Modify: `README.md`
 
 Run the full DoD gauntlet, then mark M2 complete and tag.
@@ -1891,6 +1872,7 @@ yarn dev
 ```
 
 In the running app:
+
 - Open Settings via the sidebar
 - All 5 cards visible (API & 모델, 경로, Whisper 모델, 자막 스타일, 출력 옵션)
 - Default paths populated (Downloads, Documents/.../workspace, etc.)
