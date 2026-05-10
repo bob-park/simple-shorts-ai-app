@@ -31,7 +31,7 @@ const RawHighlightSchema = z.object({
 });
 const RawResponseSchema = z.object({ highlights: z.array(RawHighlightSchema) });
 
-const HARDCODED_MODEL = 'gemma-3-4b';
+const HARDCODED_MODEL = 'gemma-4-e4b';
 
 const SYSTEM_PROMPT = (count: number, minSec: number, maxSec: number) =>
   `당신은 짧은 영상 편집자다. 아래 세그먼트(문장 단위) 트랜스크립트를 분석해서 시청자를 끌어당길 ${count}개의 하이라이트를 골라라. 각 하이라이트는 한 개 이상의 세그먼트로 구성되며 비연속(non-contiguous)일 수 있다. 모든 세그먼트의 길이 합은 ${minSec}초 ~ ${maxSec}초 사이여야 한다. 응답은 다음 JSON 스키마를 정확히 따른다: {"highlights":[{"segment_indices":number[],"title":string,"hook":string}]}. segment_indices는 아래 트랜스크립트의 [n] 번호다. 다른 어떤 텍스트도 포함하지 말고 JSON만 반환하라.`;

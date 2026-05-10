@@ -29,7 +29,7 @@ yarn lint
 
 ## LLM
 
-Highlight extraction runs locally via llama-cpp-python with a Gemma 3 4B GGUF.
+Highlight extraction runs locally via llama-cpp-python with a Gemma 4 E4B GGUF.
 The model file (~2.5GB) is downloaded automatically on the first 하이라이트 추출
 click into `~/Library/Application Support/<app>/models/`. No API key required.
 
@@ -45,5 +45,5 @@ click into `~/Library/Application Support/<app>/models/`. No API key required.
 - ✅ M8: Subtitle burn-in — word-grouped TikTok-style ASS captions, libass-rendered in the same single-pass ffmpeg run, styled by Settings.
 - ✅ M9: History persistence — better-sqlite3 + FTS5, per-short ffmpeg thumbnails, list/grid view toggle, search/sort/status-filter, detail drawer with reveal/delete.
 - ✅ M10: Segment-based highlights — non-contiguous Whisper-segment montages, single-pass ffmpeg `select` filter, M7 tracking + M8 subtitles rebased to montage time. Replaces M5's word-level extraction.
-- ✅ M11: LLM local — Gemma 3 4B Q4_K_M via llama-cpp-python in the sidecar. GBNF JSON grammar. Lazy first-call download (~2.5GB). OpenRouter cloud path removed.
+- ✅ M11: LLM local — Gemma 4 E4B Q4_K_M via llama-cpp-python in the sidecar. GBNF JSON grammar. Lazy first-call download (~2.5GB). OpenRouter cloud path removed.
 - ⏳ M12: Packaging & distribution (next — was M10 in original spec, deferred twice)

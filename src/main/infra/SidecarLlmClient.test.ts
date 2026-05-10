@@ -60,7 +60,7 @@ describe('SidecarLlmClient', () => {
     });
     const events: { processed: number; total: number }[] = [];
     const client = new SidecarLlmClient(sidecar as never, '/tmp/m.gguf');
-    await client.downloadModel({ repo: 'unsloth/gemma-3-4b-it-GGUF', filename: 'gemma-3-4b-it-Q4_K_M.gguf' }, (p) =>
+    await client.downloadModel({ repo: 'unsloth/gemma-4-E4B-it-GGUF', filename: 'gemma-4-E4B-it-Q4_K_M.gguf' }, (p) =>
       events.push({ processed: p.processed, total: p.total }),
     );
     expect(events).toEqual([
@@ -69,8 +69,8 @@ describe('SidecarLlmClient', () => {
     ]);
     expect(sidecar.request).toHaveBeenCalledWith('llm_download_model', {
       modelPath: '/tmp/m.gguf',
-      source: 'unsloth/gemma-3-4b-it-GGUF',
-      filename: 'gemma-3-4b-it-Q4_K_M.gguf',
+      source: 'unsloth/gemma-4-E4B-it-GGUF',
+      filename: 'gemma-4-E4B-it-Q4_K_M.gguf',
     });
   });
 

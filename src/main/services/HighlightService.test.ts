@@ -48,7 +48,7 @@ describe('HighlightService (segment-based, local LLM client)', () => {
     });
     expect(chat).toHaveBeenCalledTimes(1);
     expect(result.highlights).toHaveLength(2);
-    expect(result.model).toBe('gemma-3-4b');
+    expect(result.model).toBe('gemma-4-e4b');
     expect(result.highlights[0]!.segments).toEqual([
       { start_sec: 0, end_sec: 5 },
       { start_sec: 5, end_sec: 10 },

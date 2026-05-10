@@ -55,8 +55,8 @@ def test_download_model_writes_then_atomically_renames(tmp_path, monkeypatch):
 
     engine.download_model(
         model_path=model_path,
-        repo="unsloth/gemma-3-4b-it-GGUF",
-        filename="gemma-3-4b-it-Q4_K_M.gguf",
+        repo="unsloth/gemma-4-E4B-it-GGUF",
+        filename="gemma-4-E4B-it-Q4_K_M.gguf",
         progress_callback=lambda processed, total: progress_calls.append((processed, total)),
     )
     assert os.path.exists(model_path)
@@ -90,8 +90,8 @@ def test_download_model_cleans_up_partial_with_nested_subdir_on_success(tmp_path
 
     engine.download_model(
         model_path=model_path,
-        repo="unsloth/gemma-3-4b-it-GGUF",
-        filename="gemma-3-4b-it-Q4_K_M.gguf",
+        repo="unsloth/gemma-4-E4B-it-GGUF",
+        filename="gemma-4-E4B-it-Q4_K_M.gguf",
         progress_callback=lambda *_: None,
     )
     assert os.path.exists(model_path)
@@ -116,8 +116,8 @@ def test_download_model_cleans_up_partial_on_exception(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="network error"):
         engine.download_model(
             model_path=model_path,
-            repo="unsloth/gemma-3-4b-it-GGUF",
-            filename="gemma-3-4b-it-Q4_K_M.gguf",
+            repo="unsloth/gemma-4-E4B-it-GGUF",
+            filename="gemma-4-E4B-it-Q4_K_M.gguf",
             progress_callback=lambda *_: None,
         )
     # Neither final nor partial should remain

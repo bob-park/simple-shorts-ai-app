@@ -49,7 +49,7 @@ export function LlmSection() {
       description="로컬에서 실행되는 LLM. 첫 하이라이트 추출 시 자동 다운로드됩니다."
     >
       <div className="gap-sm flex flex-col">
-        <p className="text-body-md text-ink font-semibold">Gemma 3 4B (Q4_K_M)</p>
+        <p className="text-body-md text-ink font-semibold">Gemma 4 E4B (Q4_K_M)</p>
         {status === null ? (
           <p className="text-body-sm text-slate">상태 확인 중...</p>
         ) : status.exists ? (

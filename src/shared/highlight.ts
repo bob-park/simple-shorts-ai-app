@@ -31,7 +31,7 @@ export type Highlight = z.infer<typeof HighlightSchema>;
 export const HighlightSetSchema = z.object({
   /** ISO 8601 timestamp the LLM call completed. */
   generatedAt: z.string().min(1),
-  /** Model identifier reported by the LLM sidecar (e.g. 'gemma-3-4b'). */
+  /** Model identifier reported by the LLM sidecar (e.g. 'gemma-4-e4b'). */
   model: z.string().min(1),
   /** Absolute path of the source video this set was generated from. */
   audioPath: z.string().min(1),
