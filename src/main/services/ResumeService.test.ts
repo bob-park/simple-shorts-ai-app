@@ -48,6 +48,151 @@ const baseMeta = {
   webpageUrl: 'https://youtu.be/abc123',
 };
 
+describe('ResumeService.hydrate (real fs)', () => {
+  it('returns null when meta.json does not exist for sourcePath', async () => {
+    const { dl, cleanup } = await withTempDl();
+    try {
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
+      expect(await svc.hydrate(join(dl, 'no-meta.webm'))).toBeNull();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('builds download-only snapshot when only meta + source exist', async () => {
+    const { dl, cleanup } = await withTempDl();
+    try {
+      const sourcePath = join(dl, 'a.webm');
+      await writeFile(sourcePath, 'fake');
+      await writeFile(`${sourcePath}.meta.json`, JSON.stringify(baseMeta));
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
+      const snap = await svc.hydrate(sourcePath);
+      expect(snap?.download.outputPath).toBe(sourcePath);
+      expect(snap?.transcript).toBeUndefined();
+      expect(snap?.highlights).toBeUndefined();
+      expect(snap?.render).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('includes transcript when transcript.json exists and parses', async () => {
+    const { dl, cleanup } = await withTempDl();
+    try {
+      const sourcePath = join(dl, 'a.webm');
+      await writeFile(sourcePath, 'fake');
+      await writeFile(`${sourcePath}.meta.json`, JSON.stringify(baseMeta));
+      await writeFile(
+        `${sourcePath}.transcript.json`,
+        JSON.stringify({
+          duration: 60,
+          language: 'en',
+          segments: [{ start: 0, end: 5, text: 'hi' }],
+          words: [{ start: 0, end: 1, text: 'hi' }],
+        }),
+      );
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
+      const snap = await svc.hydrate(sourcePath);
+      expect(snap?.transcript?.path).toBe(`${sourcePath}.transcript.json`);
+      expect(snap?.transcript?.data.segments).toHaveLength(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('skips transcript when JSON is corrupt', async () => {
+    const { dl, cleanup } = await withTempDl();
+    try {
+      const sourcePath = join(dl, 'a.webm');
+      await writeFile(sourcePath, 'fake');
+      await writeFile(`${sourcePath}.meta.json`, JSON.stringify(baseMeta));
+      await writeFile(`${sourcePath}.transcript.json`, 'not-json');
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
+      const snap = await svc.hydrate(sourcePath);
+      expect(snap?.transcript).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('includes highlights when highlights.json exists', async () => {
+    const { dl, cleanup } = await withTempDl();
+    try {
+      const sourcePath = join(dl, 'a.webm');
+      await writeFile(sourcePath, 'fake');
+      await writeFile(`${sourcePath}.meta.json`, JSON.stringify(baseMeta));
+      await writeFile(
+        `${sourcePath}.highlights.json`,
+        JSON.stringify({
+          generatedAt: '2026-05-10T00:00:00Z',
+          model: 'gemma-3-4b',
+          audioPath: sourcePath,
+          highlights: [{ segments: [{ start_sec: 0, end_sec: 5 }], title: 'T', hook: 'h' }],
+        }),
+      );
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: '/out' } }) }, fsPromises);
+      const snap = await svc.hydrate(sourcePath);
+      expect(snap?.highlights?.data.highlights).toHaveLength(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('rebuilds render result from outputs/<stem>/short_*.mp4 when present', async () => {
+    const { dl, cleanup } = await withTempDl();
+    const out = await mkdtemp(join(tmpdir(), 'resume-out-'));
+    try {
+      const sourcePath = join(dl, 'video.webm');
+      await writeFile(sourcePath, 'fake');
+      await writeFile(`${sourcePath}.meta.json`, JSON.stringify(baseMeta));
+      await writeFile(
+        `${sourcePath}.highlights.json`,
+        JSON.stringify({
+          generatedAt: '2026-05-10T00:00:00Z',
+          model: 'gemma-3-4b',
+          audioPath: sourcePath,
+          highlights: [
+            { segments: [{ start_sec: 0, end_sec: 5 }], title: 'A', hook: 'a' },
+            { segments: [{ start_sec: 10, end_sec: 15 }], title: 'B', hook: 'b' },
+          ],
+        }),
+      );
+      const stemOut = join(out, 'video');
+      await fsPromises.mkdir(stemOut, { recursive: true });
+      await writeFile(join(stemOut, 'short_1.mp4'), 'mp4-1');
+      await writeFile(join(stemOut, 'short_2.mp4'), 'mp4-2');
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: out } }) }, fsPromises);
+      const snap = await svc.hydrate(sourcePath);
+      expect(snap?.render).toBeDefined();
+      expect(snap!.render!.result.results).toHaveLength(2);
+      expect(snap!.render!.result.results[0]!.outputPath).toBe(join(stemOut, 'short_1.mp4'));
+      expect(snap!.render!.result.results[0]!.title).toBe('A');
+      expect(snap!.render!.result.results[1]!.title).toBe('B');
+      expect(snap!.render!.result.results[0]!.status).toBe('done');
+    } finally {
+      await cleanup();
+      await rm(out, { recursive: true, force: true });
+    }
+  });
+
+  it('omits render when outputs/<stem>/ has no mp4 files', async () => {
+    const { dl, cleanup } = await withTempDl();
+    const out = await mkdtemp(join(tmpdir(), 'resume-out-'));
+    try {
+      const sourcePath = join(dl, 'video.webm');
+      await writeFile(sourcePath, 'fake');
+      await writeFile(`${sourcePath}.meta.json`, JSON.stringify(baseMeta));
+      await fsPromises.mkdir(join(out, 'video'), { recursive: true });
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: out } }) }, fsPromises);
+      const snap = await svc.hydrate(sourcePath);
+      expect(snap?.render).toBeUndefined();
+    } finally {
+      await cleanup();
+      await rm(out, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('ResumeService.detect (real fs)', () => {
   it('returns snapshot when meta.json matches videoId and source file exists', async () => {
     const { dl, cleanup } = await withTempDl();
