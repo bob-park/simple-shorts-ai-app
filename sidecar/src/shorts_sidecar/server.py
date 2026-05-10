@@ -75,7 +75,7 @@ class Server:
             self._start_llm_download(msg, outbound)
             return
         if method == "llm_chat":
-            self._start_llm_chat(msg, outbound)
+            self._handle_llm_chat(msg, outbound)
             return
         # Unknown method
         outbound.put(
@@ -227,7 +227,18 @@ class Server:
                 if self._active_job_id == job_id:
                     self._active_job_id = None
 
-    def _start_llm_chat(self, msg: dict, outbound: Queue) -> None:
+    def _handle_llm_chat(self, msg: dict, outbound: Queue) -> None:
+        """Run llm_chat synchronously on the dispatcher thread.
+
+        Why not a worker thread (the pattern transcribe and download use)?
+        llama-cpp-python's `create_chat_completion` segfaults when invoked
+        from any thread other than the one that created the Llama instance —
+        and on macOS Metal that thread effectively must be the process main
+        thread. Cancel of in-flight chat is unsupported in v1, so blocking
+        the dispatcher for the duration of the chat is acceptable: transcribe
+        runs on its own worker (independent), and health/llm_model_status
+        callers wait at most one chat duration.
+        """
         with self._lock:
             if self._worker is not None and self._worker.is_alive():
                 outbound.put(
@@ -237,17 +248,7 @@ class Server:
                     }
                 )
                 return
-            job_id = str(msg.get("id"))
-            self._active_job_id = job_id
-            self._cancel_event.clear()
-            self._worker = threading.Thread(
-                target=self._run_llm_chat,
-                args=(job_id, msg.get("params") or {}, outbound),
-                daemon=True,
-            )
-            self._worker.start()
-
-    def _run_llm_chat(self, job_id: str, params: dict, outbound: Queue) -> None:
+        params = msg.get("params") or {}
         try:
             result = self._llm_engine.chat(
                 model_path=params.get("modelPath", ""),
@@ -257,21 +258,17 @@ class Server:
                 temperature=float(params.get("temperature", 0.7)),
                 max_tokens=int(params.get("maxTokens", 4096)),
             )
-            outbound.put({"id": job_id, "result": result})
+            outbound.put({"id": msg.get("id"), "result": result})
         except Exception as e:
             outbound.put(
                 {
-                    "id": job_id,
+                    "id": msg.get("id"),
                     "error": {
                         "code": "llm_chat_failed",
                         "message": f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
                     },
                 }
             )
-        finally:
-            with self._lock:
-                if self._active_job_id == job_id:
-                    self._active_job_id = None
 
     def _handle_llm_model_status(self, msg: dict, outbound: Queue) -> None:
         params = msg.get("params") or {}
