@@ -142,8 +142,9 @@ async function fetchArch(arch: Arch): Promise<void> {
 
 async function main(): Promise<void> {
   await mkdir(CACHE_DIR, { recursive: true });
+  // Apple Silicon only — see electron-builder.yml. To re-enable Intel,
+  // also re-add x64 to mac.target.arch and call fetchArch('x64') here.
   await fetchArch('arm64');
-  await fetchArch('x64');
   console.log('\nAll runtime artifacts ready under build-resources/');
 }
 

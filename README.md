@@ -41,8 +41,7 @@ This app is unsigned, so macOS Gatekeeper will warn the first time you open it.
 2. **Right-click** the app icon in /Applications and choose **Open** (NOT double-click). Confirm "Open" in the dialog.
 3. The first launch shows a setup screen that installs the Python sidecar (~3–5 min, ~500MB on disk). Subsequent launches skip this step.
 
-Apple Silicon Macs: use `Shorts AI-<version>-arm64.dmg`.
-Intel Macs: use `Shorts AI-<version>-x64.dmg`.
+Apple Silicon Macs only. Intel Macs are not supported.
 
 ## Status
 
