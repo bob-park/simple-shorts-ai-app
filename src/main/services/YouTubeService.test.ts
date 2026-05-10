@@ -88,14 +88,14 @@ describe('YouTubeService.download', () => {
     });
   });
 
-  it('spawns yt-dlp with the %(ext)s template, free-format selector, and after_move print hook', () => {
+  it('spawns yt-dlp with the %(ext)s template, format selector, and after_move print hook', () => {
     service.download('https://youtu.be/abc', '/tmp/My Video', { videoId: 'abc' });
     expect(spawn).toHaveBeenCalledTimes(1);
     const args = spawn.mock.calls[0]?.[1] as string[];
     expect(args).toContain('--output');
     expect(args).toContain('/tmp/My Video.%(ext)s');
-    // Container is intentionally NOT forced to mp4 — yt-dlp picks the native
-    // format and the after_move hook reports the actual extension back.
+    // No --merge-output-format flag — the FORMAT_SELECTOR drives muxing
+    // directly (avc1 + m4a → mp4). See YouTubeService.ts for details.
     expect(args).not.toContain('--merge-output-format');
     // `--print-to-file` (not `--print`) — see PRINT_TEMPLATE comment in
     // YouTubeService for why progress would otherwise be suppressed.
