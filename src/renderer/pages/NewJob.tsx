@@ -1,13 +1,37 @@
+import { useEffect, useState } from 'react';
+
 import { useNewJobState } from '@renderer/components/NewJobStateContext';
 import { DownloadProgress } from '@renderer/components/newjob/DownloadProgress';
 import { HighlightCard } from '@renderer/components/newjob/HighlightCard';
 import { PreviewCard } from '@renderer/components/newjob/PreviewCard';
 import { RenderCard } from '@renderer/components/newjob/RenderCard';
+import { ResumeBanner } from '@renderer/components/newjob/ResumeBanner';
 import { TranscribeCard } from '@renderer/components/newjob/TranscribeCard';
 import { UrlInput } from '@renderer/components/newjob/UrlInput';
+import type { ResumeSnapshot } from '@shared/resume';
 
 export function NewJobPage() {
-  const { preview, download, transcribe, highlights, renderShort } = useNewJobState();
+  const { preview, download, transcribe, highlights, renderShort, hydrate } = useNewJobState();
+
+  const [resumeSnapshot, setResumeSnapshot] = useState<ResumeSnapshot | null>(null);
+  const [resumeDismissed, setResumeDismissed] = useState(false);
+
+  useEffect(() => {
+    if (preview.state.status !== 'loaded') {
+      setResumeSnapshot(null);
+      setResumeDismissed(false);
+      return;
+    }
+    if (resumeDismissed) return;
+    if (download.state.status !== 'idle') return;
+    let cancelled = false;
+    void window.api.resumeDetect(preview.state.meta.id).then((snap) => {
+      if (!cancelled) setResumeSnapshot(snap);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [preview.state, download.state.status, resumeDismissed]);
 
   const downloadInFlight = download.status === 'starting' || download.status === 'downloading';
 
@@ -29,6 +53,17 @@ export function NewJobPage() {
 
       {preview.state.status === 'error' ? (
         <p className="text-body-md text-brand-coral">영상 정보를 불러오지 못했습니다: {preview.state.error.message}</p>
+      ) : null}
+
+      {preview.state.status === 'loaded' && download.state.status === 'idle' && resumeSnapshot && !resumeDismissed ? (
+        <ResumeBanner
+          snapshot={resumeSnapshot}
+          onResume={() => {
+            hydrate(resumeSnapshot);
+            setResumeSnapshot(null);
+          }}
+          onDismiss={() => setResumeDismissed(true)}
+        />
       ) : null}
 
       {preview.state.status === 'loaded' && download.state.status === 'idle' ? (

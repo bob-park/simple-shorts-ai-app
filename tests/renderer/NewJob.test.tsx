@@ -194,4 +194,46 @@ describe('NewJobPage', () => {
     await user.click(screen.getByRole('button', { name: '숏츠 만들기' }));
     await waitFor(() => expect(calls.renderShorts).toHaveBeenCalledWith('/tmp/dQw4w9WgXcQ.mp4'));
   });
+
+  it('shows ResumeBanner when resumeDetect returns a snapshot and hydrates on click', async () => {
+    const snap = {
+      url: 'https://youtu.be/dQw4w9WgXcQ',
+      sourcePath: '/tmp/dQw4w9WgXcQ.mp4',
+      meta: baseMeta,
+      download: { outputPath: '/tmp/dQw4w9WgXcQ.mp4' },
+    };
+    installApiMock({ resumeDetect: vi.fn(async () => snap) });
+    const user = userEvent.setup();
+    render(
+      <NewJobStateProvider>
+        <NewJobPage />
+      </NewJobStateProvider>,
+    );
+    await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
+    await user.click(screen.getByRole('button', { name: '미리보기' }));
+    await waitFor(() => expect(screen.getByText(/다운로드만 완료된 영상/)).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: '이어서 작업' }));
+    await waitFor(() => expect(screen.queryByText(/다운로드만 완료된 영상/)).not.toBeInTheDocument());
+  });
+
+  it('hides ResumeBanner when 새로 시작 is clicked', async () => {
+    const snap = {
+      url: 'https://youtu.be/dQw4w9WgXcQ',
+      sourcePath: '/tmp/dQw4w9WgXcQ.mp4',
+      meta: baseMeta,
+      download: { outputPath: '/tmp/dQw4w9WgXcQ.mp4' },
+    };
+    installApiMock({ resumeDetect: vi.fn(async () => snap) });
+    const user = userEvent.setup();
+    render(
+      <NewJobStateProvider>
+        <NewJobPage />
+      </NewJobStateProvider>,
+    );
+    await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
+    await user.click(screen.getByRole('button', { name: '미리보기' }));
+    await waitFor(() => expect(screen.getByText(/다운로드만 완료된 영상/)).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: '새로 시작' }));
+    expect(screen.queryByText(/다운로드만 완료된 영상/)).not.toBeInTheDocument();
+  });
 });
