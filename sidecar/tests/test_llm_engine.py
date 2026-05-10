@@ -149,13 +149,51 @@ def test_download_model_cleans_up_partial_on_exception(tmp_path, monkeypatch):
     assert not os.path.exists(partial_dir)
 
 
-def test_highlights_grammar_compiles():
-    """Grammar string must be a valid GBNF that llama-cpp's parser accepts."""
-    from llama_cpp import LlamaGrammar
-    from shorts_sidecar.llm_engine import HIGHLIGHTS_GBNF
-    # Should not raise
-    grammar = LlamaGrammar.from_string(HIGHLIGHTS_GBNF)
-    assert grammar is not None
+def test_chat_passes_json_schema_response_format(tmp_path, monkeypatch):
+    """chat() must request response_format json_object with the highlights schema
+    so llama-cpp constrains output to the right shape — bypasses the grammar=
+    sampler chain that segfaults on Gemma 3 4B in llama-cpp-python 0.3.22."""
+    from shorts_sidecar.llm_engine import HIGHLIGHTS_JSON_SCHEMA
+
+    engine = LlmEngine()
+    fake_model_path = str(tmp_path / "model.gguf")
+    Path(fake_model_path).write_bytes(b"x")
+
+    captured: list[dict] = []
+
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            pass
+        def create_chat_completion(self, **kwargs):
+            captured.append(kwargs)
+            return {"choices": [{"message": {"content": '{"highlights":[]}'}}], "usage": {}}
+
+    import shorts_sidecar.llm_engine as eng
+    monkeypatch.setattr(eng, "Llama", FakeLlama)
+
+    engine.chat(model_path=fake_model_path, system="s", user="u", schema_id="highlights",
+                temperature=0.7, max_tokens=128)
+    assert captured[0]["response_format"] == {"type": "json_object", "schema": HIGHLIGHTS_JSON_SCHEMA}
+    assert "grammar" not in captured[0], "must NOT pass grammar= (segfault path)"
+
+
+def test_chat_rejects_unknown_schema_id(tmp_path, monkeypatch):
+    engine = LlmEngine()
+    fake_model_path = str(tmp_path / "model.gguf")
+    Path(fake_model_path).write_bytes(b"x")
+
+    class FakeLlama:
+        def __init__(self, **kwargs):
+            pass
+        def create_chat_completion(self, **kwargs):
+            return {"choices": [{"message": {"content": "{}"}}], "usage": {}}
+
+    import shorts_sidecar.llm_engine as eng
+    monkeypatch.setattr(eng, "Llama", FakeLlama)
+
+    with pytest.raises(ValueError, match="unknown schema_id"):
+        engine.chat(model_path=fake_model_path, system="s", user="u", schema_id="bogus",
+                    temperature=0.7, max_tokens=128)
 
 
 def test_chat_loads_model_once_for_repeated_calls(tmp_path, monkeypatch):

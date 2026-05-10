@@ -1,9 +1,9 @@
-"""Local LLM engine using llama-cpp-python with GBNF JSON enforcement.
+"""Local LLM engine using llama-cpp-python with JSON-schema-enforced output.
 
-Owns model load + cache, GGUF download via huggingface-hub, and JSON-grammar-
-constrained chat completion. The caller (sidecar server) is responsible for
-threading: long-running download_model and chat calls should run on the
-same worker-thread pattern used by transcribe.
+Owns model load + cache, GGUF download via huggingface-hub, and JSON-schema-
+constrained chat completion via llama-cpp's `response_format` API. The caller
+(sidecar server) is responsible for threading: long-running download_model
+and chat calls should run on the same worker-thread pattern used by transcribe.
 """
 
 from __future__ import annotations
@@ -15,28 +15,39 @@ from typing import Any, Callable
 
 import requests
 from huggingface_hub import hf_hub_url
-from llama_cpp import Llama, LlamaGrammar
+from llama_cpp import Llama
 
 # Emit a progress event every ~1MB downloaded. Smaller = smoother UI but more
 # IPC noise; 1MB on a 2.5GB file ≈ 2500 events over a multi-minute download.
 _PROGRESS_EMIT_BYTES = 1024 * 1024
 
 
-HIGHLIGHTS_GBNF = r'''
-root        ::= "{" ws "\"highlights\"" ws ":" ws highlights ws "}"
-highlights  ::= "[" ws (highlight (ws "," ws highlight)*)? ws "]"
-highlight   ::= "{" ws
-                  "\"segment_indices\"" ws ":" ws indices ws "," ws
-                  "\"title\"" ws ":" ws string ws "," ws
-                  "\"hook\"" ws ":" ws string
-                ws "}"
-indices     ::= "[" ws (integer (ws "," ws integer)*)? ws "]"
-integer     ::= [0-9]+
-string      ::= "\"" char* "\""
-char        ::= [^"\\] | "\\" ["\\/bfnrt] | "\\u" hex hex hex hex
-hex         ::= [0-9a-fA-F]
-ws          ::= [ \t\n]*
-'''
+# JSON Schema for the highlights response. llama-cpp-python translates this
+# into a GBNF grammar internally via its response_format machinery, which
+# routes through a different sampler chain than passing `grammar=` directly
+# (which segfaults on Gemma 3 4B in llama-cpp-python 0.3.22 — observed
+# inside llama_sampler_sample with x0=0).
+HIGHLIGHTS_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "highlights": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "segment_indices": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 0},
+                    },
+                    "title": {"type": "string"},
+                    "hook": {"type": "string"},
+                },
+                "required": ["segment_indices", "title", "hook"],
+            },
+        },
+    },
+    "required": ["highlights"],
+}
 
 
 class LlmEngine:
@@ -107,17 +118,11 @@ class LlmEngine:
             # half-written file on exception.
             shutil.rmtree(partial_dir, ignore_errors=True)
 
-    # Pre-compile grammars at first use (lazy so tests can patch).
-    _grammars: dict[str, Any] = {}
-
-    @classmethod
-    def _grammar(cls, schema_id: str) -> Any:
-        if schema_id not in cls._grammars:
-            if schema_id in ("highlights", "highlights_rerank"):
-                cls._grammars[schema_id] = LlamaGrammar.from_string(HIGHLIGHTS_GBNF)
-            else:
-                raise ValueError(f"unknown schema_id: {schema_id!r}")
-        return cls._grammars[schema_id]
+    @staticmethod
+    def _schema_for(schema_id: str) -> dict[str, Any]:
+        if schema_id in ("highlights", "highlights_rerank"):
+            return HIGHLIGHTS_JSON_SCHEMA
+        raise ValueError(f"unknown schema_id: {schema_id!r}")
 
     def _ensure_loaded(self, model_path: str) -> Any:
         if self._loaded_model is None or self._loaded_model_path != model_path:
@@ -143,13 +148,13 @@ class LlmEngine:
         max_tokens: int,
     ) -> dict[str, Any]:
         model = self._ensure_loaded(model_path)
-        grammar = self._grammar(schema_id)
+        schema = self._schema_for(schema_id)
         out = model.create_chat_completion(
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            grammar=grammar,
+            response_format={"type": "json_object", "schema": schema},
             temperature=temperature,
             max_tokens=max_tokens,
         )
