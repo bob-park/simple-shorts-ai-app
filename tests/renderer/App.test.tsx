@@ -1,6 +1,6 @@
 import { App } from '@renderer/App';
 import type { Settings } from '@shared/settings';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -58,26 +58,30 @@ beforeAll(() => {
     historyDelete: vi.fn(async () => undefined),
     resumeDetect: vi.fn(async (_id: string) => null),
     resumeHydrate: vi.fn(async (_p: string) => null),
+    setupStatus: vi.fn(async () => 'ready' as const),
+    setupRun: vi.fn(async () => undefined),
+    onSetupProgress: vi.fn(() => () => undefined),
   } satisfies Window['api'];
 });
 
 describe('App shell', () => {
-  it('renders the sidebar with all three nav items', () => {
+  it('renders the sidebar with all three nav items', async () => {
     render(<App />);
-    expect(screen.getByRole('navigation', { name: '주 내비게이션' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('navigation', { name: '주 내비게이션' })).toBeInTheDocument());
     expect(screen.getByRole('link', { name: '새 작업' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '히스토리' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '설정' })).toBeInTheDocument();
   });
 
-  it('shows the NewJob page on initial route', () => {
+  it('shows the NewJob page on initial route', async () => {
     render(<App />);
-    expect(screen.getByRole('heading', { name: '새 작업' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('heading', { name: '새 작업' })).toBeInTheDocument());
   });
 
   it('navigates to settings when the Settings link is clicked', async () => {
     const user = userEvent.setup();
     render(<App />);
+    await waitFor(() => expect(screen.getByRole('link', { name: '설정' })).toBeInTheDocument());
     await user.click(screen.getByRole('link', { name: '설정' }));
     expect(screen.getByRole('heading', { name: '설정' })).toBeInTheDocument();
   });

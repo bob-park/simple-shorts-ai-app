@@ -41,6 +41,7 @@ src/
 ### Task 1: Extend RenderClipResult with optional subtitles field
 
 **Files:**
+
 - Modify: `src/shared/render.ts`
 
 The UI will display "subtitles applied: N cues" per clip. Add the optional field to the existing schema (mirrors the `tracking` field added in M7).
@@ -88,6 +89,7 @@ git commit -m "feat(m8): add optional subtitles field to RenderClipResult schema
 ### Task 2: SubtitleGenerator pure logic (TDD)
 
 **Files:**
+
 - Create: `src/main/services/SubtitleGenerator.ts`
 - Create: `src/main/services/SubtitleGenerator.test.ts`
 
@@ -98,9 +100,9 @@ Pure function: takes transcript words + a clip window + style options, returns A
 Create `src/main/services/SubtitleGenerator.test.ts` with EXACTLY this content:
 
 ```ts
+import type { Word } from '@shared/transcript';
 import { describe, expect, it } from 'vitest';
 
-import type { Word } from '@shared/transcript';
 import { buildAssFile, hexToAssColor } from './SubtitleGenerator';
 
 const STYLE = {
@@ -160,12 +162,7 @@ describe('buildAssFile', () => {
 
   it('groups words into 2-per-cue chunks', () => {
     // 4 words → 2 cues (w0+w1, w2+w3)
-    const words = [
-      w('one', 0, 0.5),
-      w('two', 0.5, 1.0),
-      w('three', 1.0, 1.5),
-      w('four', 1.5, 2.0),
-    ];
+    const words = [w('one', 0, 0.5), w('two', 0.5, 1.0), w('three', 1.0, 1.5), w('four', 1.5, 2.0)];
     const result = buildAssFile(words, 0, 5, STYLE);
     const dialogues = result.split('\n').filter((l) => l.startsWith('Dialogue:'));
     expect(dialogues).toHaveLength(2);
@@ -274,12 +271,7 @@ const MARGIN_V = 200;
  * per cue. Returns an empty string when no words fall in the window so the
  * caller can skip writing the file + appending the subtitles filter.
  */
-export function buildAssFile(
-  words: Word[],
-  clipStartSec: number,
-  clipEndSec: number,
-  style: SubtitleStyle,
-): string {
+export function buildAssFile(words: Word[], clipStartSec: number, clipEndSec: number, style: SubtitleStyle): string {
   const inWindow = words.filter((w) => w.start < clipEndSec && w.end > clipStartSec);
   if (inWindow.length === 0) return '';
 
@@ -361,6 +353,7 @@ yarn test src/main/services/SubtitleGenerator.test.ts
 ```
 
 If a test fails:
+
 - "applies position=bottom → ASS Alignment 2": the regex matches "Alignment" as part of the format header line; the actual style line has the value. The current Style line format is `Style: Default,Font,Size,FillColor,OutlineColor,BorderStyle,Outline,Alignment,MarginV,Encoding` — alignment is the 8th column. Verify the implementation puts `2` (or `5`) in position 8.
 - Time format edge case: 1.005s should round to `0:00:01.01` (not `0:00:01.00` or `0:00:01.51`). The `Math.round(sec * 100)` handles this correctly.
 
@@ -378,10 +371,12 @@ git commit -m "feat(m8): add SubtitleGenerator pure logic for ASS file generatio
 ### Task 3: Extend RenderService with optional subtitle generation (TDD)
 
 **Files:**
+
 - Modify: `src/main/services/RenderService.ts`
 - Modify: `src/main/services/RenderService.test.ts`
 
 Per clip in the render loop:
+
 1. If `subtitleOptions != null` AND `transcriptWords` provided → call `buildAssFile(words, h.start_sec, h.end_sec, subtitleOptions)`.
 2. If non-empty result → write `${outputDir}/short_N.ass`, append `,subtitles=filename=<path>` to the existing filter chain. Result records `subtitles: { cues, assPath }`.
 3. If empty (no words in window) OR `subtitleOptions` is null → no .ass file, no filter append. Result records `subtitles: null`.
@@ -514,7 +509,7 @@ a) Add the import at the top (alongside the existing imports):
 ```ts
 import type { Word } from '@shared/transcript';
 
-import { buildAssFile, type SubtitleStyle } from './SubtitleGenerator';
+import { type SubtitleStyle, buildAssFile } from './SubtitleGenerator';
 ```
 
 b) Find the `RenderOptions` interface. Add two new optional fields:
@@ -548,9 +543,7 @@ const baseArgs =
     ? buildTrackedArgs(opts.sourcePath, h, outputPath, trackingInfo.cmdPath)
     : buildCenterArgs(opts.sourcePath, h, outputPath);
 const subtitlesInfo = await this.maybeWriteSubtitles(opts, h, clipIndex);
-const args = subtitlesInfo
-  ? appendSubtitleFilter(baseArgs, subtitlesInfo.assPath)
-  : baseArgs;
+const args = subtitlesInfo ? appendSubtitleFilter(baseArgs, subtitlesInfo.assPath) : baseArgs;
 ```
 
 d) Find the `buildClipResult` call after `await handle.done`. Currently:
@@ -563,9 +556,7 @@ results.push(
     'done',
     outputPath,
     undefined,
-    trackingInfo
-      ? { frames: trackingInfo.frameCount, trackPath: trackingInfo.trackPath }
-      : null,
+    trackingInfo ? { frames: trackingInfo.frameCount, trackPath: trackingInfo.trackPath } : null,
   ),
 );
 ```
@@ -580,9 +571,7 @@ results.push(
     'done',
     outputPath,
     undefined,
-    trackingInfo
-      ? { frames: trackingInfo.frameCount, trackPath: trackingInfo.trackPath }
-      : null,
+    trackingInfo ? { frames: trackingInfo.frameCount, trackPath: trackingInfo.trackPath } : null,
     subtitlesInfo ? { cues: subtitlesInfo.cueCount, assPath: subtitlesInfo.assPath } : null,
   ),
 );
@@ -672,6 +661,7 @@ git commit -m "feat(m8): extend RenderService with optional subtitle generation 
 ### Task 4: Wire transcript.words + settings.subtitles in main.ts
 
 **Files:**
+
 - Modify: `src/main/main.ts`
 
 The `render:run` IPC handler currently reads `<audioPath>.highlights.json` (M6) and uses `settings.paths.outputs` (M6). For M8 it ALSO needs to read `<audioPath>.transcript.json` (already exists from M4) for the words array, and pass `settings.subtitles` through (already in M2 settings) — but only when `settings.subtitles.enabled === true`.
@@ -776,6 +766,7 @@ git commit -m "feat(m8): pass transcript words + settings.subtitles to render se
 ### Task 5: Surface per-clip subtitles status in RenderCard
 
 **Files:**
+
 - Modify: `src/renderer/components/newjob/RenderCard.tsx`
 
 Show a small note next to each `done` clip indicating subtitle status (mirroring the M7 tracking note pattern).
@@ -785,20 +776,26 @@ Show a small note next to each `done` clip indicating subtitle status (mirroring
 In `src/renderer/components/newjob/RenderCard.tsx`, find the `props.status === 'done'` block. Locate the existing tracking note lines:
 
 ```tsx
-{r.status === 'done' && r.tracking ? (
-  <p className="text-body-sm text-slate mt-xs">🎯 얼굴 추적 {r.tracking.frames}프레임</p>
-) : null}
-{r.status === 'done' && r.tracking === null ? (
-  <p className="text-body-sm text-slate mt-xs">⊕ 중앙 크롭 폴백 (얼굴 미감지)</p>
-) : null}
+{
+  r.status === 'done' && r.tracking ? (
+    <p className="text-body-sm text-slate mt-xs">🎯 얼굴 추적 {r.tracking.frames}프레임</p>
+  ) : null;
+}
+{
+  r.status === 'done' && r.tracking === null ? (
+    <p className="text-body-sm text-slate mt-xs">⊕ 중앙 크롭 폴백 (얼굴 미감지)</p>
+  ) : null;
+}
 ```
 
 After those two lines, add:
 
 ```tsx
-{r.status === 'done' && r.subtitles ? (
-  <p className="text-body-sm text-slate mt-xs">✏️ 자막 {r.subtitles.cues}개 cue</p>
-) : null}
+{
+  r.status === 'done' && r.subtitles ? (
+    <p className="text-body-sm text-slate mt-xs">✏️ 자막 {r.subtitles.cues}개 cue</p>
+  ) : null;
+}
 ```
 
 (No "subtitles disabled" note — when the user has subtitles off in settings, silence in the UI is the right signal. The note only appears when subtitles were actually applied.)
@@ -825,6 +822,7 @@ git commit -m "feat(m8): show subtitle cue count per clip in RenderCard"
 ### Task 6: DoD verification + README + finalize branch
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Run all DoD checks**
@@ -846,6 +844,7 @@ yarn dev
 ```
 
 In the app:
+
 1. **Settings** — confirm `subtitles.enabled = true` (default). Optionally tweak `fontFamily` (default Pretendard — must be installed system-wide for the chosen font), `fontSize`, `fillColor`/`outlineColor`.
 2. NewJob page — paste a short Korean or English talking-head URL, walk preview → 다운로드 → STT 시작 → 하이라이트 추출 → 숏츠 만들기.
 3. When done, each clip card should now show "✏️ 자막 N개 cue" alongside the existing "🎯 얼굴 추적 N프레임".

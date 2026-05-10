@@ -6,10 +6,11 @@ import { VideoMetaSchema, sanitizeFilename } from '@shared/youtube';
 import Database from 'better-sqlite3';
 import { BrowserWindow, app, dialog, ipcMain, session, shell } from 'electron';
 import Store from 'electron-store';
-import { spawn } from 'node:child_process';
-import { promises as fsPromises } from 'node:fs';
-import { basename, extname, join, resolve as resolvePath } from 'node:path';
+import { execFile, spawn } from 'node:child_process';
+import { existsSync, promises as fsPromises } from 'node:fs';
+import { basename, extname, join, resolve as resolvePath, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import youtubeDl from 'youtube-dl-exec';
 
 import { FfmpegRunner } from './infra/FfmpegRunner';
@@ -21,6 +22,7 @@ import { HighlightService } from './services/HighlightService';
 import { HistoryService } from './services/HistoryService';
 import { RenderService } from './services/RenderService';
 import { ResumeService } from './services/ResumeService';
+import { SetupWizardService } from './services/SetupWizardService';
 import { ThumbnailService } from './services/ThumbnailService';
 import { TrackingService } from './services/TrackingService';
 import { TranscribeService } from './services/TranscribeService';
@@ -28,6 +30,70 @@ import { type DownloadHandle, YouTubeService } from './services/YouTubeService';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const isDev = !app.isPackaged;
+
+interface RuntimePaths {
+  uvBinary: string;
+  pythonRuntime: string;
+  venvPath: string;
+  requirementsPath: string;
+  ffmpegBinary: string;
+  /**
+   * Standalone yt-dlp binary (PyInstaller single-file). Used instead of
+   * youtube-dl-exec's bundled zipapp because the zipapp shells out to system
+   * Python, and macOS's system Python (3.9 from CommandLineTools) is too old
+   * for current yt-dlp (requires 3.10+).
+   */
+  ytdlpBinary: string;
+  sidecarCwd: string;
+  /**
+   * In packaged mode, sidecar is launched as the venv's python directly;
+   * in dev mode, `uv run python -m shorts_sidecar` (which auto-resolves the
+   * venv via uv).
+   */
+  sidecarSpawn: { command: string; args: string[] };
+  /**
+   * Extra env vars for the sidecar spawn. In packaged mode, PYTHONPATH points
+   * at the bundled `shorts_sidecar` package source so `python -m shorts_sidecar`
+   * resolves it (uv pip install only installs deps, not our own package).
+   */
+  sidecarEnv: Record<string, string>;
+}
+
+function resolveRuntimePaths(): RuntimePaths {
+  if (app.isPackaged) {
+    const r = process.resourcesPath;
+    const venvPath = join(app.getPath('userData'), 'sidecar-venv');
+    return {
+      uvBinary: join(r, 'uv'),
+      pythonRuntime: join(r, 'python-runtime', 'bin', 'python3.11'),
+      venvPath,
+      requirementsPath: join(r, 'requirements.txt'),
+      ffmpegBinary: join(r, 'ffmpeg'),
+      ytdlpBinary: join(r, 'yt-dlp'),
+      sidecarCwd: r,
+      sidecarSpawn: {
+        command: join(venvPath, 'bin', 'python'),
+        args: ['-m', 'shorts_sidecar'],
+      },
+      sidecarEnv: { PYTHONPATH: join(r, 'sidecar-src') },
+    };
+  }
+  // Dev mode — same behavior as before
+  const repoRoot = resolvePath(__dirname, '../../');
+  return {
+    uvBinary: 'uv',
+    pythonRuntime: 'python3.11',
+    venvPath: join(repoRoot, 'sidecar', '.venv'),
+    requirementsPath: join(repoRoot, 'sidecar', 'requirements.txt'),
+    ffmpegBinary: 'ffmpeg',
+    // Dev mode: fall back to youtube-dl-exec's bundled zipapp via the
+    // shell's PATH-resolved python3 (mise/asdf/system 3.10+).
+    ytdlpBinary: '',
+    sidecarCwd: join(repoRoot, 'sidecar'),
+    sidecarSpawn: { command: 'uv', args: ['run', 'python', '-m', 'shorts_sidecar'] },
+    sidecarEnv: {},
+  };
+}
 
 // Local LLM model identity — single source of truth for both extract:run's
 // on-demand download and Settings re-download.
@@ -57,6 +123,7 @@ let trackingService: TrackingService | null = null;
 let historyRepo: HistoryRepo | null = null;
 let historyService: HistoryService | null = null;
 let resumeService: ResumeService | null = null;
+let setupWizard: SetupWizardService | null = null;
 
 function setupContentSecurityPolicy(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -116,14 +183,14 @@ function createMainWindow(): BrowserWindow {
 
 function getTranscribeService(): TranscribeService {
   if (transcribeService) return transcribeService;
-  const repoRoot = resolvePath(__dirname, '../../');
+  const paths = resolveRuntimePaths();
   const modelsDir = join(app.getPath('userData'), 'whisper-models');
   pythonSidecar = new PythonSidecar({
     spawn,
-    command: 'uv',
-    args: ['run', 'python', '-m', 'shorts_sidecar'],
-    cwd: join(repoRoot, 'sidecar'),
-    env: { HF_HOME: modelsDir },
+    command: paths.sidecarSpawn.command,
+    args: paths.sidecarSpawn.args,
+    cwd: paths.sidecarCwd,
+    env: { HF_HOME: modelsDir, ...paths.sidecarEnv },
   });
   transcribeService = new TranscribeService(pythonSidecar);
 
@@ -161,7 +228,11 @@ function getHighlightService(): HighlightService {
 
 function getRenderService(): RenderService {
   if (renderService) return renderService;
-  ffmpegRunner = new FfmpegRunner({ spawn });
+  const paths = resolveRuntimePaths();
+  ffmpegRunner = new FfmpegRunner({
+    spawn,
+    command: app.isPackaged && existsSync(paths.ffmpegBinary) ? paths.ffmpegBinary : 'ffmpeg',
+  });
   // Tracking goes through the same Python sidecar that owns transcribe (lazy
   // boot on first call). Reuse the existing PythonSidecar instance if it's
   // already been spun up by transcribe; otherwise this triggers it.
@@ -192,7 +263,11 @@ function getHistoryRepo(): HistoryRepo {
 function getHistoryService(): HistoryService {
   if (historyService) return historyService;
   if (!ffmpegRunner) {
-    ffmpegRunner = new FfmpegRunner({ spawn });
+    const paths = resolveRuntimePaths();
+    ffmpegRunner = new FfmpegRunner({
+      spawn,
+      command: app.isPackaged && existsSync(paths.ffmpegBinary) ? paths.ffmpegBinary : 'ffmpeg',
+    });
   }
   const thumbnails = new ThumbnailService(ffmpegRunner);
   historyService = new HistoryService({
@@ -209,6 +284,26 @@ function getResumeService(): ResumeService {
   return resumeService;
 }
 
+function getSetupWizard(): SetupWizardService {
+  if (setupWizard) return setupWizard;
+  const paths = resolveRuntimePaths();
+  setupWizard = new SetupWizardService({
+    uvBinary: paths.uvBinary,
+    pythonRuntime: paths.pythonRuntime,
+    venvPath: paths.venvPath,
+    requirementsPath: paths.requirementsPath,
+    spawn,
+    fs: { access: fsPromises.access },
+  });
+  setupWizard.onProgress((p) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('setup:progress', p);
+    }
+  });
+  return setupWizard;
+}
+
 void app.whenReady().then(() => {
   setupContentSecurityPolicy();
 
@@ -218,13 +313,45 @@ void app.whenReady().then(() => {
     downloads: app.getPath('downloads'),
     documents: app.getPath('documents'),
   });
+  const runtimePathsBoot = resolveRuntimePaths();
+  // yt-dlp resolution:
+  //
+  // Packaged mode — use the standalone PyInstaller binary bundled at
+  // Resources/yt-dlp (see scripts/fetch-runtime.ts). It has its own embedded
+  // Python, so it doesn't depend on system Python. (youtube-dl-exec's bundled
+  // yt-dlp is a Python zipapp that shells out to system python3, which on
+  // macOS is 3.9 from CommandLineTools — too old for current yt-dlp.)
+  //
+  // Dev mode — fall back to youtube-dl-exec's bundled zipapp (the dev
+  // shell PATH usually has python 3.10+ via mise/asdf). Rewrite the asar
+  // path just in case the dev mode happens to be launched packaged.
+  //
+  // We invoke via execFile() rather than youtube-dl-exec's default function
+  // because that pipes through tinyspawn, which splits the binary path on
+  // whitespace (tinyspawn/src/index.js:45) — broken for paths like
+  // "/Applications/Shorts AI.app/...".
+  const ytdlpFromYdlExec = (youtubeDl as unknown as { constants: { YOUTUBE_DL_PATH: string } }).constants
+    .YOUTUBE_DL_PATH;
+  const ytdlpBinaryPath = app.isPackaged
+    ? runtimePathsBoot.ytdlpBinary
+    : ytdlpFromYdlExec.replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`);
+  console.log('[main] yt-dlp binary path:', ytdlpBinaryPath);
+  const execFileP = promisify(execFile);
+  const ytdlpFn = async (url: string, flags: Record<string, unknown>) => {
+    const args: string[] = [url];
+    if (flags.dumpSingleJson) args.push('--dump-single-json');
+    if (flags.skipDownload) args.push('--skip-download');
+    if (flags.noWarnings) args.push('--no-warnings');
+    const { stdout } = await execFileP(ytdlpBinaryPath, args, {
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return JSON.parse(stdout);
+  };
   youtubeService = new YouTubeService({
-    youtubeDl: youtubeDl as never,
+    youtubeDl: ytdlpFn as never,
     spawn: spawn as never,
-    // The downloader spawns yt-dlp directly (separate from youtube-dl-exec's
-    // default export); without an explicit path it would fall back to
-    // PATH lookup and fail with ENOENT in dev. Point it at the bundled binary.
-    binaryPath: (youtubeDl as unknown as { constants: { YOUTUBE_DL_PATH: string } }).constants.YOUTUBE_DL_PATH,
+    binaryPath: ytdlpBinaryPath,
+    ffmpegLocation: runtimePathsBoot.ffmpegBinary,
   });
 
   // IPC handlers
@@ -510,6 +637,9 @@ void app.whenReady().then(() => {
     }
   });
 
+  ipcMain.handle('setup:status', () => getSetupWizard().status());
+  ipcMain.handle('setup:run', () => getSetupWizard().run());
+
   createMainWindow();
 
   app.on('activate', () => {
@@ -537,5 +667,6 @@ app.on('window-all-closed', () => {
   historyRepo = null;
   historyService = null;
   resumeService = null;
+  setupWizard = null;
   if (process.platform !== 'darwin') app.quit();
 });

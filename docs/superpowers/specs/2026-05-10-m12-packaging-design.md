@@ -125,7 +125,7 @@ mac:
   target:
     - target: dmg
       arch: [arm64, x64]
-  identity: null  # explicit no-sign
+  identity: null # explicit no-sign
   hardenedRuntime: false
 extraResources:
   - from: build-resources/${arch}/python-runtime
@@ -203,12 +203,12 @@ The pip stdout is parsed for lines like `Resolved 23 packages`, `Building wheel 
 
 ## 5. Failure handling
 
-| Failure | UX |
-|---|---|
-| Network error during pip install | SetupCard 'error' state with stderr tail + "다시 시도" |
-| `uv venv` exits non-zero | Same |
-| User quits app mid-install | Next launch sees incomplete venv → re-detect: if `bin/python` missing, treat as never-installed |
-| Disk full | pip stderr surfaces; user sees the error |
+| Failure                                                          | UX                                                                                                             |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Network error during pip install                                 | SetupCard 'error' state with stderr tail + "다시 시도"                                                         |
+| `uv venv` exits non-zero                                         | Same                                                                                                           |
+| User quits app mid-install                                       | Next launch sees incomplete venv → re-detect: if `bin/python` missing, treat as never-installed                |
+| Disk full                                                        | pip stderr surfaces; user sees the error                                                                       |
 | `python-runtime` quarantined and Gatekeeper blocks dylib loading | xattr-strip step in 1.2 prevents this; if it still happens, error message includes "macOS 보안 설정 확인" hint |
 
 The wizard does **not** auto-cleanup partial installs. Re-running setup overwrites in place; if venv is corrupt, user can manually delete `~/Library/Application Support/Shorts AI/sidecar-venv` and re-run setup.
@@ -219,12 +219,12 @@ The wizard does **not** auto-cleanup partial installs. Re-running setup overwrit
 
 ### 6.1 Unit tests
 
-| File | Cases |
-|---|---|
+| File                               | Cases                                                                                                       |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `SetupWizardService.test.ts` (new) | venv exists detection, run() spawns uv with correct args, pip progress parsing (3 cases), error propagation |
-| `PythonSidecar.test.ts` | (update) venv path resolution: packaged vs dev mode (2 new cases) |
-| `FfmpegRunner.test.ts` | (update) bundled ffmpeg path takes precedence over PATH (2 new cases) |
-| `Setup.test.tsx` (new) | renders all three states, click "재시도" calls api.setup.run, progress event updates pct |
+| `PythonSidecar.test.ts`            | (update) venv path resolution: packaged vs dev mode (2 new cases)                                           |
+| `FfmpegRunner.test.ts`             | (update) bundled ffmpeg path takes precedence over PATH (2 new cases)                                       |
+| `Setup.test.tsx` (new)             | renders all three states, click "재시도" calls api.setup.run, progress event updates pct                    |
 
 Net ~10 new test cases. Total target: ~190 vitest pass.
 
@@ -261,16 +261,16 @@ If a user has an existing `~/Library/Application Support/Shorts AI/` directory w
 
 ## 8. Risk + edge cases
 
-| Risk | Mitigation |
-|---|---|
-| python-build-standalone Universal2 binary requires both arches present at runtime | Use per-arch unpack; arm64 dmg gets arm64 python, x64 dmg gets x86_64 python |
-| mediapipe wheel availability for Apple Silicon | Verified at brainstorming time: PyPI has `mediapipe-0.10.18-cp311-cp311-macosx_11_0_universal2.whl` |
-| Gatekeeper blocks dylib loading from unsigned bundle | xattr-strip step + "right-click → Open" instructions in README |
-| .app size approaches 200MB before deps install | Acceptable; users see ~50MB DMG, expand on disk |
-| pip install fails partway, leaves broken venv | Detection logic checks `bin/python` existence (not just dir); failed install leaves no `bin/python` so re-run is safe |
-| User on macOS 11 (below targeted macOS 12) | electron-builder's mac.minimumSystemVersion = "12.0" enforces; older macOS shows "App requires macOS 12.0 or later" |
-| ffmpeg static binary's libass version mismatch with .ass features | Test against representative .ass output before pinning the ffmpeg source |
-| Bundled uv/Python adds ~80MB to .dmg | Accept; it's the cost of "embedded runtime" choice |
+| Risk                                                                              | Mitigation                                                                                                            |
+| --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| python-build-standalone Universal2 binary requires both arches present at runtime | Use per-arch unpack; arm64 dmg gets arm64 python, x64 dmg gets x86_64 python                                          |
+| mediapipe wheel availability for Apple Silicon                                    | Verified at brainstorming time: PyPI has `mediapipe-0.10.18-cp311-cp311-macosx_11_0_universal2.whl`                   |
+| Gatekeeper blocks dylib loading from unsigned bundle                              | xattr-strip step + "right-click → Open" instructions in README                                                        |
+| .app size approaches 200MB before deps install                                    | Acceptable; users see ~50MB DMG, expand on disk                                                                       |
+| pip install fails partway, leaves broken venv                                     | Detection logic checks `bin/python` existence (not just dir); failed install leaves no `bin/python` so re-run is safe |
+| User on macOS 11 (below targeted macOS 12)                                        | electron-builder's mac.minimumSystemVersion = "12.0" enforces; older macOS shows "App requires macOS 12.0 or later"   |
+| ffmpeg static binary's libass version mismatch with .ass features                 | Test against representative .ass output before pinning the ffmpeg source                                              |
+| Bundled uv/Python adds ~80MB to .dmg                                              | Accept; it's the cost of "embedded runtime" choice                                                                    |
 
 ---
 

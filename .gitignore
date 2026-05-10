@@ -90,3 +90,6 @@ sidecar/.mypy_cache/
 
 # M11: locally-downloaded GGUF models
 **/models/
+
+# M12: build outputs and downloaded runtime artifacts
+build-resources/

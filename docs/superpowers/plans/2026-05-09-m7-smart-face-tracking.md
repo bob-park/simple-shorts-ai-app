@@ -54,6 +54,7 @@ src/renderer/
 ### Task 1: Add mediapipe + opencv-python deps to sidecar
 
 **Files:**
+
 - Modify: `sidecar/pyproject.toml`
 - Modify: `sidecar/uv.lock`
 
@@ -118,6 +119,7 @@ git commit -m "chore(m7): add mediapipe + opencv-python sidecar deps"
 ### Task 2: Python face_tracker module (TDD)
 
 **Files:**
+
 - Create: `sidecar/src/shorts_sidecar/face_tracker.py`
 - Create: `sidecar/tests/test_face_tracker.py`
 
@@ -579,6 +581,7 @@ git commit -m "feat(m7): add FaceTracker with mediapipe + cv2 factories and gaus
 ### Task 3: Wire track_faces into the sidecar Server (TDD)
 
 **Files:**
+
 - Modify: `sidecar/src/shorts_sidecar/server.py`
 - Modify: `sidecar/tests/test_server.py`
 
@@ -790,6 +793,7 @@ git commit -m "feat(m7): add track_faces RPC method to sidecar server"
 ### Task 4: Shared Track types (zod)
 
 **Files:**
+
 - Create: `src/shared/track.ts`
 
 - [ ] **Step 1: Create `src/shared/track.ts` with EXACTLY this content**
@@ -843,6 +847,7 @@ git commit -m "feat(m7): add shared Track zod schemas"
 ### Task 5: TrackingService thin facade (TDD)
 
 **Files:**
+
 - Create: `src/main/services/TrackingService.ts`
 - Create: `src/main/services/TrackingService.test.ts`
 
@@ -924,7 +929,7 @@ yarn test src/main/services/TrackingService.test.ts
 - [ ] **Step 3: Implement `src/main/services/TrackingService.ts` with EXACTLY this content**
 
 ```ts
-import { TrackResultSchema, type TrackResult } from '@shared/track';
+import { type TrackResult, TrackResultSchema } from '@shared/track';
 
 interface SidecarLike {
   request<T>(method: string, params?: Record<string, unknown>): Promise<T>;
@@ -978,6 +983,7 @@ git commit -m "feat(m7): add TrackingService thin facade over PythonSidecar"
 ### Task 6: SendcmdGenerator pure logic (TDD)
 
 **Files:**
+
 - Create: `src/main/services/SendcmdGenerator.ts`
 - Create: `src/main/services/SendcmdGenerator.test.ts`
 
@@ -990,9 +996,9 @@ The crop box is `crop=ih*9/16:ih:x:y` where `x = clamp(cx - crop_w/2, 0, source_
 Create `src/main/services/SendcmdGenerator.test.ts` with EXACTLY this content:
 
 ```ts
+import type { TrackResult } from '@shared/track';
 import { describe, expect, it } from 'vitest';
 
-import type { TrackResult } from '@shared/track';
 import { buildSendcmd } from './SendcmdGenerator';
 
 function track(frames: { t: number; cx: number; cy: number }[]): TrackResult {
@@ -1117,6 +1123,7 @@ git commit -m "feat(m7): add SendcmdGenerator pure logic for ffmpeg dynamic crop
 ### Task 7: Extend RenderClipResult with optional tracking field
 
 **Files:**
+
 - Modify: `src/shared/render.ts`
 
 The UI will display "tracked N frames" or "center crop fallback" per clip. Add the optional field to the existing schema.
@@ -1163,6 +1170,7 @@ git commit -m "feat(m7): add optional tracking field to RenderClipResult schema"
 ### Task 8: Extend RenderService with optional tracker (TDD)
 
 **Files:**
+
 - Modify: `src/main/services/RenderService.ts`
 - Modify: `src/main/services/RenderService.test.ts`
 
@@ -1179,7 +1187,11 @@ Tracking failure (throw) does NOT fail the clip — we just fall back. The exist
 After the existing tests (`'returns immediately with empty results when given an empty highlights list'`), append:
 
 ```ts
-function fakeTracker(result: { sourceWidth: number; sourceHeight: number; frames: { t: number; cx: number; cy: number }[] }) {
+function fakeTracker(result: {
+  sourceWidth: number;
+  sourceHeight: number;
+  frames: { t: number; cx: number; cy: number }[];
+}) {
   return {
     track: vi.fn(async () => result),
   };
@@ -1305,12 +1317,11 @@ Expected: 6 existing pass, 3 new fail.
 Replace the file with EXACTLY this content (additive — preserves the buildArgs function for the center-crop path, adds buildTrackedArgs for the tracked path):
 
 ```ts
-import { promises as fsPromises } from 'node:fs';
-import { join } from 'node:path';
-
 import type { Highlight } from '@shared/highlight';
 import type { RenderClipResult, RenderProgress, RenderResult } from '@shared/render';
 import type { TrackResult } from '@shared/track';
+import { promises as fsPromises } from 'node:fs';
+import { join } from 'node:path';
 
 import { buildSendcmd } from './SendcmdGenerator';
 
@@ -1323,10 +1334,7 @@ interface RunnerLike {
 }
 
 interface TrackerLike {
-  track(
-    videoPath: string,
-    opts: { startSec: number; endSec: number; fpsSample?: number },
-  ): Promise<TrackResult>;
+  track(videoPath: string, opts: { startSec: number; endSec: number; fpsSample?: number }): Promise<TrackResult>;
 }
 
 type FsLike = Pick<typeof fsPromises, 'writeFile'>;
@@ -1364,7 +1372,10 @@ export class RenderService {
   private readonly tracker?: TrackerLike;
   private readonly fs: FsLike;
 
-  constructor(private readonly runner: RunnerLike, options: RenderServiceOptions = {}) {
+  constructor(
+    private readonly runner: RunnerLike,
+    options: RenderServiceOptions = {},
+  ) {
     this.tracker = options.tracker;
     this.fs = options.fs ?? fsPromises;
   }
@@ -1418,9 +1429,7 @@ export class RenderService {
             'done',
             outputPath,
             undefined,
-            trackingInfo
-              ? { frames: trackingInfo.frameCount, trackPath: trackingInfo.trackPath }
-              : null,
+            trackingInfo ? { frames: trackingInfo.frameCount, trackPath: trackingInfo.trackPath } : null,
           ),
         );
       } catch (e: unknown) {
@@ -1515,12 +1524,7 @@ function buildCenterArgs(sourcePath: string, h: Highlight, outputPath: string): 
   ];
 }
 
-function buildTrackedArgs(
-  sourcePath: string,
-  h: Highlight,
-  outputPath: string,
-  cmdPath: string,
-): string[] {
+function buildTrackedArgs(sourcePath: string, h: Highlight, outputPath: string, cmdPath: string): string[] {
   const filter = `sendcmd=f=${cmdPath},crop@c=ih*9/16:ih:0:0,scale=1080:1920`;
   return [
     '-y',
@@ -1560,6 +1564,7 @@ git commit -m "feat(m7): extend RenderService with optional tracker + sendcmd pa
 ### Task 9: Wire TrackingService into main.ts
 
 **Files:**
+
 - Modify: `src/main/main.ts`
 
 `getRenderService()` currently builds `new RenderService(ffmpegRunner)`. Inject the tracker so M7 face tracking is on by default.
@@ -1654,6 +1659,7 @@ git commit -m "feat(m7): inject TrackingService into RenderService at lazy-init 
 ### Task 10: Surface per-clip tracking status in RenderCard
 
 **Files:**
+
 - Modify: `src/renderer/components/newjob/RenderCard.tsx`
 
 Show a small note next to each `done` clip indicating whether tracking succeeded.
@@ -1663,19 +1669,14 @@ Show a small note next to each `done` clip indicating whether tracking succeeded
 In `src/renderer/components/newjob/RenderCard.tsx`, find the `props.status === 'done'` block. The current per-clip `<li>` looks like:
 
 ```tsx
-<li
-  key={r.index}
-  className={`p-md rounded-lg ${r.status === 'done' ? 'bg-surface' : 'bg-warning-bg'}`}
->
+<li key={r.index} className={`p-md rounded-lg ${r.status === 'done' ? 'bg-surface' : 'bg-warning-bg'}`}>
   <p className="text-body-md text-ink font-semibold">
     #{r.index} {r.title}{' '}
     <span className="text-body-sm text-slate font-normal">
       {r.status === 'done' ? '✓ 완료' : r.status === 'canceled' ? '⊘ 취소됨' : '✗ 실패'}
     </span>
   </p>
-  {r.outputPath ? (
-    <p className="text-body-sm text-slate mt-xs break-all">{r.outputPath}</p>
-  ) : null}
+  {r.outputPath ? <p className="text-body-sm text-slate mt-xs break-all">{r.outputPath}</p> : null}
   {r.error ? <p className="text-body-sm text-brand-coral mt-xs">{r.error}</p> : null}
 </li>
 ```
@@ -1683,12 +1684,16 @@ In `src/renderer/components/newjob/RenderCard.tsx`, find the `props.status === '
 Add a tracking note line AFTER the outputPath line and BEFORE the error line:
 
 ```tsx
-{r.status === 'done' && r.tracking ? (
-  <p className="text-body-sm text-slate mt-xs">🎯 얼굴 추적 {r.tracking.frames}프레임</p>
-) : null}
-{r.status === 'done' && r.tracking === null ? (
-  <p className="text-body-sm text-slate mt-xs">⊕ 중앙 크롭 폴백 (얼굴 미감지)</p>
-) : null}
+{
+  r.status === 'done' && r.tracking ? (
+    <p className="text-body-sm text-slate mt-xs">🎯 얼굴 추적 {r.tracking.frames}프레임</p>
+  ) : null;
+}
+{
+  r.status === 'done' && r.tracking === null ? (
+    <p className="text-body-sm text-slate mt-xs">⊕ 중앙 크롭 폴백 (얼굴 미감지)</p>
+  ) : null;
+}
 ```
 
 (`r.tracking === null` distinguishes "no faces detected" from `undefined`/`undefined` (no tracker run, e.g., test fixtures pre-Task 7) — both branches show or hide cleanly thanks to the `.nullish()` schema.)
@@ -1715,6 +1720,7 @@ git commit -m "feat(m7): show tracking note (frames or center fallback) per clip
 ### Task 11: DoD verification + README + finalize branch
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Run all DoD checks**
@@ -1736,6 +1742,7 @@ yarn dev
 ```
 
 In the app:
+
 1. NewJob page — paste a short YouTube URL with a clear talking-head subject (not a music video / animation), click 미리보기, 다운로드, wait.
 2. Click STT 시작, wait for transcript.
 3. Click 하이라이트 추출, wait for highlights.

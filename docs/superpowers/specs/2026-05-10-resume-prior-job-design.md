@@ -25,7 +25,7 @@ Every step in the pipeline already writes its artifact next to the source video:
 └── short_<i>.mp4                      # render output (after render)
 ```
 
-History DB (M9) records *completed* renders with `sourcePath`, but doesn't track partial pipelines (download-only, download+STT, etc.). Disk artifacts are the source of truth for resume detection.
+History DB (M9) records _completed_ renders with `sourcePath`, but doesn't track partial pipelines (download-only, download+STT, etc.). Disk artifacts are the source of truth for resume detection.
 
 ### 1.2 Detection model
 
@@ -38,13 +38,13 @@ Both produce the same shape:
 
 ```ts
 interface ResumeSnapshot {
-  url: string;                                              // from meta.json
-  sourcePath: string;                                        // absolute path to original video
-  meta: VideoMeta;                                           // parsed via VideoMetaSchema
-  download: { outputPath: string };                          // always present (sourcePath itself)
-  transcript?: { path: string; data: Transcript };           // if .transcript.json exists + parses
-  highlights?: { path: string; data: HighlightSet };         // if .highlights.json exists + parses
-  render?: { outputDir: string; result: RenderResult };      // if outputs/<stem>/ has any short_*.mp4
+  url: string; // from meta.json
+  sourcePath: string; // absolute path to original video
+  meta: VideoMeta; // parsed via VideoMetaSchema
+  download: { outputPath: string }; // always present (sourcePath itself)
+  transcript?: { path: string; data: Transcript }; // if .transcript.json exists + parses
+  highlights?: { path: string; data: HighlightSet }; // if .highlights.json exists + parses
+  render?: { outputDir: string; result: RenderResult }; // if outputs/<stem>/ has any short_*.mp4
 }
 ```
 
@@ -94,15 +94,15 @@ Because the M11 NewJobStateProvider sits above react-router's Outlet, the naviga
 
 ### 1.6 Failure modes
 
-| Situation | Behavior |
-|---|---|
-| `meta.json` exists but `<sourcePath>` file missing | Treat as no snapshot; user starts fresh |
-| `transcript.json` exists but fails zod parse | Skip transcript step in snapshot (treat as not done); user re-runs STT |
-| `highlights.json` exists but fails zod parse | Skip highlights in snapshot |
-| `outputs/<stem>/` exists but empty | No `render` field in snapshot |
-| Multiple meta.json files match same videoId | Pick most recent (`downloadedAt` descending); ignore others |
-| `videoId` not present in any meta.json | Return null; user proceeds normally |
-| `settings.paths.downloads` doesn't exist (fresh install) | Return null without error |
+| Situation                                                | Behavior                                                               |
+| -------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `meta.json` exists but `<sourcePath>` file missing       | Treat as no snapshot; user starts fresh                                |
+| `transcript.json` exists but fails zod parse             | Skip transcript step in snapshot (treat as not done); user re-runs STT |
+| `highlights.json` exists but fails zod parse             | Skip highlights in snapshot                                            |
+| `outputs/<stem>/` exists but empty                       | No `render` field in snapshot                                          |
+| Multiple meta.json files match same videoId              | Pick most recent (`downloadedAt` descending); ignore others            |
+| `videoId` not present in any meta.json                   | Return null; user proceeds normally                                    |
+| `settings.paths.downloads` doesn't exist (fresh install) | Return null without error                                              |
 
 ### 1.7 What stays the same
 
@@ -207,13 +207,13 @@ return { state, status: state.status, start, cancel, reset, hydrateDone };
 
 The 5 hydrators:
 
-| Hook | Method signature |
-|---|---|
-| `useVideoPreview` | `hydrateLoaded(url: string, meta: VideoMeta)` |
-| `useDownload` | `hydrateDone(url: string, outputPath: string)` |
-| `useTranscribe` | `hydrateDone(audioPath: string, transcriptPath: string, transcript: Transcript)` |
-| `useHighlights` | `hydrateDone(audioPath: string, highlightsPath: string, highlightSet: HighlightSet)` |
-| `useRender` | `hydrateDone(audioPath: string, result: RenderResult)` |
+| Hook              | Method signature                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------ |
+| `useVideoPreview` | `hydrateLoaded(url: string, meta: VideoMeta)`                                        |
+| `useDownload`     | `hydrateDone(url: string, outputPath: string)`                                       |
+| `useTranscribe`   | `hydrateDone(audioPath: string, transcriptPath: string, transcript: Transcript)`     |
+| `useHighlights`   | `hydrateDone(audioPath: string, highlightsPath: string, highlightSet: HighlightSet)` |
+| `useRender`       | `hydrateDone(audioPath: string, result: RenderResult)`                               |
 
 ### 3.4 Reconstructing `RenderResult` from disk
 
@@ -223,7 +223,7 @@ When `outputs/<stem>/` exists with mp4 files, build a synthetic `RenderResult`:
 async function tryRebuildRender(outputDir: string, highlightSet: HighlightSet | null) {
   if (!highlightSet) return undefined;
   const files = await fsPromises.readdir(outputDir).catch(() => []);
-  const shorts = files.filter(f => /^short_\d+\.mp4$/.test(f)).sort();
+  const shorts = files.filter((f) => /^short_\d+\.mp4$/.test(f)).sort();
   if (shorts.length === 0) return undefined;
   const results: RenderClipResult[] = shorts.map((file, idx) => {
     const highlight = highlightSet.highlights[idx];
@@ -250,7 +250,7 @@ async function tryRebuildRender(outputDir: string, highlightSet: HighlightSet | 
 Tiny presentational component shown above PreviewCard when a snapshot is available:
 
 ```tsx
-<section className="border-hairline bg-canvas p-md rounded-lg border-l-4 border-l-brand-blue">
+<section className="border-hairline bg-canvas p-md border-l-brand-blue rounded-lg border-l-4">
   <p className="text-body-md text-ink">
     이전에 작업한 영상이에요.
     {snapshot.render && ' 이미 숏츠까지 만들어졌습니다.'}
@@ -258,7 +258,7 @@ Tiny presentational component shown above PreviewCard when a snapshot is availab
     {snapshot.transcript && !snapshot.highlights && ' STT까지 완료됐습니다.'}
     {!snapshot.transcript && ' 다운로드만 완료된 상태입니다.'}
   </p>
-  <div className="gap-sm flex mt-sm">
+  <div className="gap-sm mt-sm flex">
     <button onClick={onResume}>이어서 작업</button>
     <button onClick={onDismiss}>새로 시작</button>
   </div>
@@ -290,13 +290,15 @@ useEffect(() => {
 `JobDetailDrawer` (or `HistoryListView` row actions) — add a button:
 
 ```tsx
-<button onClick={() => {
-  navigate('/');
-  void window.api.resumeHydrate(job.sourcePath).then((snap) => {
-    if (snap) hydrate(snap);
-    // null → silently fall through to fresh NewJob page
-  });
-}}>
+<button
+  onClick={() => {
+    navigate('/');
+    void window.api.resumeHydrate(job.sourcePath).then((snap) => {
+      if (snap) hydrate(snap);
+      // null → silently fall through to fresh NewJob page
+    });
+  }}
+>
   이어서 작업
 </button>
 ```
@@ -307,16 +309,16 @@ The `navigate('/')` happens first so NewJob mounts; the hydrate call fires after
 
 ## 4. Failure handling + edge cases
 
-| Edge case | Behavior |
-|---|---|
-| `settings.paths.downloads` is unset / non-existent | `resume:detect` returns null without throwing |
-| `meta.json` parse error (corrupt file) | Skip silently; that file isn't a candidate |
-| Source video file deleted but meta.json remains | Treated as not a valid resume target — return null |
-| User pastes URL with extra query params (timestamp, etc.) | `videoId` extraction by `youtubeService.fetchMeta` strips them; matching still works |
-| User has 100+ prior downloads | Scan is O(n), each meta.json ~300 bytes. Sub-second on typical hardware. No cache in v1. |
-| Snapshot has highlights but no transcript (impossible normally) | `hydrate()` only calls `useTranscribe.hydrateDone` if `snapshot.transcript` is set; downstream `useHighlights.hydrateDone` is independently driven by `snapshot.highlights`. The UI may briefly look "highlights done but transcribe not done" — visually odd but functionally non-breaking. Not expected in practice. |
-| User hits "이어서 작업" then "다시 [단계]" on a hydrated card | Existing reset/start path takes over normally; resume is just an entry point. |
-| Renderer's outputs path differs from where the original render wrote (user changed Settings → Output path) | `tryRebuildRender` checks `<settings.paths.outputs>/<stem>/`; if path no longer matches, no `render` field. User would have to re-render. |
+| Edge case                                                                                                  | Behavior                                                                                                                                                                                                                                                                                                               |
+| ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settings.paths.downloads` is unset / non-existent                                                         | `resume:detect` returns null without throwing                                                                                                                                                                                                                                                                          |
+| `meta.json` parse error (corrupt file)                                                                     | Skip silently; that file isn't a candidate                                                                                                                                                                                                                                                                             |
+| Source video file deleted but meta.json remains                                                            | Treated as not a valid resume target — return null                                                                                                                                                                                                                                                                     |
+| User pastes URL with extra query params (timestamp, etc.)                                                  | `videoId` extraction by `youtubeService.fetchMeta` strips them; matching still works                                                                                                                                                                                                                                   |
+| User has 100+ prior downloads                                                                              | Scan is O(n), each meta.json ~300 bytes. Sub-second on typical hardware. No cache in v1.                                                                                                                                                                                                                               |
+| Snapshot has highlights but no transcript (impossible normally)                                            | `hydrate()` only calls `useTranscribe.hydrateDone` if `snapshot.transcript` is set; downstream `useHighlights.hydrateDone` is independently driven by `snapshot.highlights`. The UI may briefly look "highlights done but transcribe not done" — visually odd but functionally non-breaking. Not expected in practice. |
+| User hits "이어서 작업" then "다시 [단계]" on a hydrated card                                              | Existing reset/start path takes over normally; resume is just an entry point.                                                                                                                                                                                                                                          |
+| Renderer's outputs path differs from where the original render wrote (user changed Settings → Output path) | `tryRebuildRender` checks `<settings.paths.outputs>/<stem>/`; if path no longer matches, no `render` field. User would have to re-render.                                                                                                                                                                              |
 
 ---
 
@@ -328,13 +330,13 @@ The `navigate('/')` happens first so NewJob mounts; the hydrate call fires after
 
 ## 6. Testing
 
-| File | Cases |
-|---|---|
-| `ResumeService.test.ts` (new) | detect: matches videoId, picks most recent on duplicates, returns null when no match, returns null when sourcePath missing, parse-failure tolerance. ~5 cases. |
-| `ResumeService.test.ts` | hydrate: builds snapshot with all 4 fields, builds with only download, builds with download+transcript, returns null when meta missing. ~4 cases. |
-| `useDownload.test.ts` etc. (or inline in NewJob.test.tsx) | hydrateDone pushes state to 'done' shape correctly. ~5 cases (one per hook). |
-| `tests/renderer/NewJob.test.tsx` | Resume banner appears when snapshot returned; clicking "이어서 작업" hydrates context and cards reflect done; clicking "새로 시작" dismisses banner. ~3 cases. |
-| `tests/renderer/History.test.tsx` | "이어서 작업" button triggers navigate + resumeHydrate + hydrate. ~1 case. |
+| File                                                      | Cases                                                                                                                                                          |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ResumeService.test.ts` (new)                             | detect: matches videoId, picks most recent on duplicates, returns null when no match, returns null when sourcePath missing, parse-failure tolerance. ~5 cases. |
+| `ResumeService.test.ts`                                   | hydrate: builds snapshot with all 4 fields, builds with only download, builds with download+transcript, returns null when meta missing. ~4 cases.              |
+| `useDownload.test.ts` etc. (or inline in NewJob.test.tsx) | hydrateDone pushes state to 'done' shape correctly. ~5 cases (one per hook).                                                                                   |
+| `tests/renderer/NewJob.test.tsx`                          | Resume banner appears when snapshot returned; clicking "이어서 작업" hydrates context and cards reflect done; clicking "새로 시작" dismisses banner. ~3 cases. |
+| `tests/renderer/History.test.tsx`                         | "이어서 작업" button triggers navigate + resumeHydrate + hydrate. ~1 case.                                                                                     |
 
 Net ~18 vitest additions. Sidecar pytest unchanged.
 
@@ -342,14 +344,14 @@ Net ~18 vitest additions. Sidecar pytest unchanged.
 
 ## 7. Risk + edge cases
 
-| Risk | Mitigation |
-|---|---|
-| Snapshot builder reads files that change underneath (race) | All reads happen in main process before sending IPC response; subsequent file edits don't affect the already-sent snapshot |
-| Large transcript.json (10+ minute videos can be ~500KB) sent over IPC | Acceptable — single one-shot transfer per resume click, not streamed |
-| Resume banner flashes briefly when user pastes URL (preview→loaded→detect call→banner) | Acceptable; the "이전에 작업한..." copy is informative even if it appears late |
-| User starts pipeline, navigates away, comes back, re-pastes URL → both Context state AND disk snapshot exist | Banner only shows when `download.status === 'idle'`; if Context already has work in flight, no banner |
-| Race between `navigate('/')` and `resumeHydrate(...)` from History | `hydrate()` is synchronous setState; React schedules a re-render. NewJobPage mounts via the navigate; hydrate fires after promise resolves. No race. |
-| Fresh install with no downloads dir | `fsPromises.readdir` throws ENOENT; `ResumeService.detect` catches and returns null |
+| Risk                                                                                                         | Mitigation                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Snapshot builder reads files that change underneath (race)                                                   | All reads happen in main process before sending IPC response; subsequent file edits don't affect the already-sent snapshot                           |
+| Large transcript.json (10+ minute videos can be ~500KB) sent over IPC                                        | Acceptable — single one-shot transfer per resume click, not streamed                                                                                 |
+| Resume banner flashes briefly when user pastes URL (preview→loaded→detect call→banner)                       | Acceptable; the "이전에 작업한..." copy is informative even if it appears late                                                                       |
+| User starts pipeline, navigates away, comes back, re-pastes URL → both Context state AND disk snapshot exist | Banner only shows when `download.status === 'idle'`; if Context already has work in flight, no banner                                                |
+| Race between `navigate('/')` and `resumeHydrate(...)` from History                                           | `hydrate()` is synchronous setState; React schedules a re-render. NewJobPage mounts via the navigate; hydrate fires after promise resolves. No race. |
+| Fresh install with no downloads dir                                                                          | `fsPromises.readdir` throws ENOENT; `ResumeService.detect` catches and returns null                                                                  |
 
 ---
 

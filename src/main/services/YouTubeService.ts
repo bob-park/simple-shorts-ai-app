@@ -15,6 +15,12 @@ export interface YouTubeServiceDeps {
   spawn: SpawnLike;
   /** Absolute path to the yt-dlp binary. Defaults to `'yt-dlp'` (PATH lookup). */
   binaryPath?: string;
+  /**
+   * Absolute path to ffmpeg, passed to yt-dlp via `--ffmpeg-location`. Without
+   * this, yt-dlp downloads video and audio streams but can't merge them, so
+   * the user ends up with `<title>.f<id>.mp4` instead of the merged file.
+   */
+  ffmpegLocation?: string;
 }
 
 export interface DownloadOptions {
@@ -92,6 +98,9 @@ export class YouTubeService {
       '--print',
       PRINT_TEMPLATE,
     ];
+    if (this.deps.ffmpegLocation) {
+      args.push('--ffmpeg-location', this.deps.ffmpegLocation);
+    }
     const child = this.deps.spawn(this.deps.binaryPath ?? 'yt-dlp', args, {});
 
     const progressCallbacks: ((p: DownloadProgress) => void)[] = [];

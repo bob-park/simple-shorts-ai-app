@@ -33,6 +33,17 @@ Highlight extraction runs locally via llama-cpp-python with a Gemma 3 4B GGUF.
 The model file (~2.5GB) is downloaded automatically on the first 하이라이트 추출
 click into `~/Library/Application Support/<app>/models/`. No API key required.
 
+## Install (macOS)
+
+This app is unsigned, so macOS Gatekeeper will warn the first time you open it.
+
+1. Mount the `.dmg`, drag **Shorts AI** to **Applications**.
+2. **Right-click** the app icon in /Applications and choose **Open** (NOT double-click). Confirm "Open" in the dialog.
+3. The first launch shows a setup screen that installs the Python sidecar (~3–5 min, ~500MB on disk). Subsequent launches skip this step.
+
+Apple Silicon Macs: use `Shorts AI-<version>-arm64.dmg`.
+Intel Macs: use `Shorts AI-<version>-x64.dmg`.
+
 ## Status
 
 - ✅ M1: Project Skeleton
@@ -46,4 +57,4 @@ click into `~/Library/Application Support/<app>/models/`. No API key required.
 - ✅ M9: History persistence — better-sqlite3 + FTS5, per-short ffmpeg thumbnails, list/grid view toggle, search/sort/status-filter, detail drawer with reveal/delete.
 - ✅ M10: Segment-based highlights — non-contiguous Whisper-segment montages, single-pass ffmpeg `select` filter, M7 tracking + M8 subtitles rebased to montage time. Replaces M5's word-level extraction.
 - ✅ M11: LLM local — Gemma 3 4B Q4_K_M via llama-cpp-python in the sidecar. GBNF JSON grammar. Lazy first-call download (~2.5GB). OpenRouter cloud path removed.
-- ⏳ M12: Packaging & distribution (next — was M10 in original spec, deferred twice)
+- ✅ M12: Packaging & distribution — macOS .dmg builds (Apple Silicon + Intel), unsigned, embedded Python + bundled ffmpeg, first-run setup wizard.

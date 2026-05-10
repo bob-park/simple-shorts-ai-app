@@ -74,6 +74,7 @@ tests/
 ### Task 1: Toolchain — pin Python 3.11 + uv via mise
 
 **Files:**
+
 - Modify: `.mise.toml`
 - Modify: `.gitignore`
 
@@ -133,6 +134,7 @@ git commit -m "chore(m4): pin python 3.11 and uv via mise, ignore python build a
 ### Task 2: Sidecar project scaffold (pyproject + dependencies)
 
 **Files:**
+
 - Create: `sidecar/pyproject.toml`
 - Create: `sidecar/README.md`
 - Create: `sidecar/src/shorts_sidecar/__init__.py`
@@ -169,7 +171,7 @@ pythonpath = ["src"]
 
 - [ ] **Step 2: Create `sidecar/README.md`**
 
-```markdown
+````markdown
 # shorts-sidecar
 
 Long-running Python process that speaks line-delimited JSON-RPC over stdio.
@@ -183,6 +185,7 @@ uv sync                     # creates .venv with deps
 uv run pytest               # runs the test suite
 uv run python -m shorts_sidecar < /dev/null  # smoke (immediate EOF → exits 0)
 ```
+````
 
 Send a request manually:
 
@@ -191,7 +194,8 @@ echo '{"id":"1","method":"health"}' | uv run python -m shorts_sidecar
 ```
 
 Expected output: `{"id":"1","result":{"ok":true,"modelsLoaded":[]}}`.
-```
+
+````
 
 - [ ] **Step 3: Create the package entry**
 
@@ -201,7 +205,7 @@ Create `sidecar/src/shorts_sidecar/__init__.py`:
 """Long-running STT/face-tracking sidecar for simple-shorts-ai-app."""
 
 __version__ = "0.1.0"
-```
+````
 
 - [ ] **Step 4: Initialize the venv and install deps**
 
@@ -227,6 +231,7 @@ git commit -m "feat(m4): scaffold sidecar python project with faster-whisper dep
 ### Task 3: RPC line protocol (TDD)
 
 **Files:**
+
 - Create: `sidecar/src/shorts_sidecar/rpc.py`
 - Create: `sidecar/tests/__init__.py`
 - Create: `sidecar/tests/test_rpc.py`
@@ -373,6 +378,7 @@ git commit -m "feat(m4): add line-JSON RPC helpers with pytest coverage"
 ### Task 4: Whisper engine wrapper (TDD with mocked WhisperModel)
 
 **Files:**
+
 - Create: `sidecar/src/shorts_sidecar/whisper_engine.py`
 - Create: `sidecar/tests/test_whisper_engine.py`
 
@@ -640,10 +646,12 @@ git commit -m "feat(m4): add WhisperEngine generator-style wrapper with cancel"
 ### Task 5: Server (dispatcher with worker thread + cancel) — TDD
 
 **Files:**
+
 - Create: `sidecar/src/shorts_sidecar/server.py`
 - Create: `sidecar/tests/test_server.py`
 
 `Server` ties RPC + WhisperEngine together. It owns:
+
 - Inbound queue (filled by stdin reader in `__main__`)
 - Outbound queue (drained by stdout writer in `__main__`)
 - Worker thread that runs the current transcribe job
@@ -957,6 +965,7 @@ git commit -m "feat(m4): add Server dispatcher with cancellable transcribe worke
 ### Task 6: Sidecar entrypoint (`__main__.py`)
 
 **Files:**
+
 - Create: `sidecar/src/shorts_sidecar/__main__.py`
 
 The entrypoint wires stdin → inbound queue, outbound queue → stdout, and runs the Server. We test it via a smoke command rather than unit tests because it involves real stdio.
@@ -1028,7 +1037,7 @@ echo '{"id":"1","method":"health"}' | uv run python -m shorts_sidecar
 Expected output (one line):
 
 ```json
-{"id":"1","result":{"ok":true,"modelsLoaded":[]}}
+{ "id": "1", "result": { "ok": true, "modelsLoaded": [] } }
 ```
 
 If you see anything else (Python traceback, no output, multiple lines), STOP and report.
@@ -1053,6 +1062,7 @@ git commit -m "feat(m4): add sidecar entrypoint with stdin reader and stdout wri
 ### Task 7: Shared Transcript types (zod schemas)
 
 **Files:**
+
 - Create: `src/shared/transcript.ts`
 - Create: `src/shared/transcribe.ts`
 
@@ -1100,13 +1110,7 @@ export const TranscribeProgressSchema = z.object({
 });
 export type TranscribeProgress = z.infer<typeof TranscribeProgressSchema>;
 
-export type TranscribeStatus =
-  | 'idle'
-  | 'starting'
-  | 'transcribing'
-  | 'done'
-  | 'canceled'
-  | 'error';
+export type TranscribeStatus = 'idle' | 'starting' | 'transcribing' | 'done' | 'canceled' | 'error';
 ```
 
 - [ ] **Step 3: Format + verify**
@@ -1130,6 +1134,7 @@ git commit -m "feat(m4): add shared Transcript and TranscribeProgress schemas"
 ### Task 8: IPC contract extension
 
 **Files:**
+
 - Modify: `src/shared/ipc.ts`
 
 - [ ] **Step 1: Replace `src/shared/ipc.ts` entirely**
@@ -1202,6 +1207,7 @@ git commit -m "feat(m4): extend AppApi with transcribe/cancelTranscribe/onTransc
 ### Task 9: PythonSidecar (Node — process + RPC client) — TDD
 
 **Files:**
+
 - Create: `src/main/infra/PythonSidecar.ts`
 - Create: `src/main/infra/PythonSidecar.test.ts`
 
@@ -1524,6 +1530,7 @@ git commit -m "feat(m4): add PythonSidecar with id correlation and progress disp
 ### Task 10: TranscribeService (orchestrator) — TDD
 
 **Files:**
+
 - Create: `src/main/services/TranscribeService.ts`
 - Create: `src/main/services/TranscribeService.test.ts`
 
@@ -1610,8 +1617,8 @@ yarn test src/main/services/TranscribeService.test.ts
 - [ ] **Step 3: Implement `src/main/services/TranscribeService.ts`**
 
 ```ts
-import { TranscriptSchema, type Transcript } from '@shared/transcript';
 import type { TranscribeProgress } from '@shared/transcribe';
+import { type Transcript, TranscriptSchema } from '@shared/transcript';
 
 interface SidecarLike {
   request<T>(method: string, params?: Record<string, unknown>): Promise<T>;
@@ -1669,9 +1676,11 @@ git commit -m "feat(m4): add TranscribeService thin facade over PythonSidecar"
 ### Task 11: Wire IPC handlers in main.ts (transcribe + sidecar lifecycle + transcript persistence)
 
 **Files:**
+
 - Modify: `src/main/main.ts`
 
 The handler:
+
 1. Resolves the sidecar's working directory (`<repo>/sidecar` in dev, packaged path in prod — for M4 we only handle dev).
 2. Reads current settings to pick the Whisper model + language.
 3. Calls `transcribeService.transcribe(audioPath, ...)`.
@@ -1687,6 +1696,7 @@ Edit `src/main/main.ts`. Near the existing imports, add:
 ```ts
 import { writeFile } from 'node:fs/promises';
 import { dirname, resolve as resolvePath } from 'node:path';
+
 import { PythonSidecar } from './infra/PythonSidecar';
 import { TranscribeService } from './services/TranscribeService';
 ```
@@ -1807,6 +1817,7 @@ git commit -m "feat(m4): wire transcribe IPC + sidecar lifecycle + transcript pe
 ### Task 12: Update preload bridge
 
 **Files:**
+
 - Modify: `src/main/preload.ts`
 
 - [ ] **Step 1: Replace the file content entirely**
@@ -1907,12 +1918,14 @@ git commit -m "feat(m4): expose transcribe/health/openPath on window.api and upd
 ### Task 13: useTranscribe hook
 
 **Files:**
+
 - Create: `src/renderer/hooks/useTranscribe.ts`
 
 - [ ] **Step 1: Create the file**
 
 ```ts
 import { useCallback, useEffect, useState } from 'react';
+
 import type { TranscribeProgress, TranscribeStatus } from '@shared/transcribe';
 import type { Transcript } from '@shared/transcript';
 
@@ -1997,6 +2010,7 @@ git commit -m "feat(m4): add useTranscribe hook with progress subscription"
 ### Task 14: TranscribeCard component
 
 **Files:**
+
 - Create: `src/renderer/components/newjob/TranscribeCard.tsx`
 
 Renders five visual states matching `TranscribeState`. Uses Tailwind tokens consistent with `DownloadProgress`.
@@ -2029,10 +2043,10 @@ type Props =
 
 export function TranscribeCard(props: Props) {
   return (
-    <section className="rounded-xl border border-hairline bg-canvas p-xxl shadow-1">
+    <section className="border-hairline bg-canvas p-xxl shadow-1 rounded-xl border">
       {props.status === 'idle' ? (
-        <div className="flex flex-col gap-md">
-          <h3 className="text-card-title font-semibold text-ink">전사</h3>
+        <div className="gap-md flex flex-col">
+          <h3 className="text-card-title text-ink font-semibold">전사</h3>
           <p className="text-body-sm text-slate">
             다운로드된 영상의 음성을 텍스트로 변환합니다. 처음 실행 시 Whisper 모델이 다운로드됩니다.
           </p>
@@ -2051,9 +2065,9 @@ export function TranscribeCard(props: Props) {
       ) : null}
 
       {props.status === 'transcribing' ? (
-        <div className="flex flex-col gap-md">
-          <div className="flex items-baseline justify-between gap-md">
-            <h3 className="text-card-title font-semibold text-ink">전사 중 {formatPercent(props.progress)}</h3>
+        <div className="gap-md flex flex-col">
+          <div className="gap-md flex items-baseline justify-between">
+            <h3 className="text-card-title text-ink font-semibold">전사 중 {formatPercent(props.progress)}</h3>
             <p className="text-body-sm text-slate">
               {props.progress.processed.toFixed(1)}s / {props.progress.total.toFixed(1)}s
             </p>
@@ -2080,7 +2094,7 @@ export function TranscribeCard(props: Props) {
       ) : null}
 
       {props.status === 'done' ? (
-        <div className="flex flex-col gap-md">
+        <div className="gap-md flex flex-col">
           <h3 className="text-card-title text-success-text font-semibold">전사 완료</h3>
           <p className="text-body-sm text-slate">
             {props.transcript.segments.length}개 세그먼트 · {props.transcript.words.length}개 단어 ·{' '}
@@ -2107,7 +2121,7 @@ export function TranscribeCard(props: Props) {
       ) : null}
 
       {props.status === 'canceled' ? (
-        <div className="flex flex-col gap-md">
+        <div className="gap-md flex flex-col">
           <h3 className="text-card-title text-ink font-semibold">전사 취소됨</h3>
           <button
             type="button"
@@ -2120,7 +2134,7 @@ export function TranscribeCard(props: Props) {
       ) : null}
 
       {props.status === 'error' ? (
-        <div className="flex flex-col gap-md">
+        <div className="gap-md flex flex-col">
           <h3 className="text-card-title text-brand-coral font-semibold">전사 실패</h3>
           <p className="text-body-sm text-slate break-all">{props.error.message}</p>
           <button
@@ -2156,6 +2170,7 @@ git commit -m "feat(m4): add TranscribeCard with idle/starting/transcribing/done
 ### Task 15: Compose into NewJob.tsx
 
 **Files:**
+
 - Modify: `src/renderer/pages/NewJob.tsx`
 
 After the download `done` block, add the TranscribeCard. The card pulls its own state from `useTranscribe`. We pass `download.state.outputPath` as the audio source.
@@ -2184,24 +2199,8 @@ const transcribe = useTranscribe();
 Find the existing block:
 
 ```tsx
-{download.state.status === 'done' ? (
-  <DownloadProgress
-    status="done"
-    outputPath={download.state.outputPath}
-    onReveal={() => void window.api.revealInFolder(download.state.outputPath)}
-    onReset={() => {
-      download.reset();
-      preview.reset();
-    }}
-  />
-) : null}
-```
-
-Wrap this and the new TranscribeCard in a fragment so both render together when download is done:
-
-```tsx
-{download.state.status === 'done' ? (
-  <>
+{
+  download.state.status === 'done' ? (
     <DownloadProgress
       status="done"
       outputPath={download.state.outputPath}
@@ -2209,48 +2208,60 @@ Wrap this and the new TranscribeCard in a fragment so both render together when 
       onReset={() => {
         download.reset();
         preview.reset();
-        transcribe.reset();
       }}
     />
-    {transcribe.state.status === 'idle' ? (
-      <TranscribeCard
-        status="idle"
-        onStart={() =>
-          void transcribe.start(
-            download.state.status === 'done' ? download.state.outputPath : '',
-          )
-        }
-      />
-    ) : null}
-    {transcribe.state.status === 'starting' ? <TranscribeCard status="starting" /> : null}
-    {transcribe.state.status === 'transcribing' ? (
-      <TranscribeCard
-        status="transcribing"
-        progress={transcribe.state.progress}
-        onCancel={() => void transcribe.cancel()}
-      />
-    ) : null}
-    {transcribe.state.status === 'done' ? (
-      <TranscribeCard
+  ) : null;
+}
+```
+
+Wrap this and the new TranscribeCard in a fragment so both render together when download is done:
+
+```tsx
+{
+  download.state.status === 'done' ? (
+    <>
+      <DownloadProgress
         status="done"
-        transcriptPath={transcribe.state.transcriptPath}
-        transcript={transcribe.state.transcript}
-        onOpen={() => void window.api.openPath(transcribe.state.transcriptPath)}
-        onReset={() => transcribe.reset()}
+        outputPath={download.state.outputPath}
+        onReveal={() => void window.api.revealInFolder(download.state.outputPath)}
+        onReset={() => {
+          download.reset();
+          preview.reset();
+          transcribe.reset();
+        }}
       />
-    ) : null}
-    {transcribe.state.status === 'canceled' ? (
-      <TranscribeCard status="canceled" onReset={() => transcribe.reset()} />
-    ) : null}
-    {transcribe.state.status === 'error' ? (
-      <TranscribeCard
-        status="error"
-        error={transcribe.state.error}
-        onReset={() => transcribe.reset()}
-      />
-    ) : null}
-  </>
-) : null}
+      {transcribe.state.status === 'idle' ? (
+        <TranscribeCard
+          status="idle"
+          onStart={() => void transcribe.start(download.state.status === 'done' ? download.state.outputPath : '')}
+        />
+      ) : null}
+      {transcribe.state.status === 'starting' ? <TranscribeCard status="starting" /> : null}
+      {transcribe.state.status === 'transcribing' ? (
+        <TranscribeCard
+          status="transcribing"
+          progress={transcribe.state.progress}
+          onCancel={() => void transcribe.cancel()}
+        />
+      ) : null}
+      {transcribe.state.status === 'done' ? (
+        <TranscribeCard
+          status="done"
+          transcriptPath={transcribe.state.transcriptPath}
+          transcript={transcribe.state.transcript}
+          onOpen={() => void window.api.openPath(transcribe.state.transcriptPath)}
+          onReset={() => transcribe.reset()}
+        />
+      ) : null}
+      {transcribe.state.status === 'canceled' ? (
+        <TranscribeCard status="canceled" onReset={() => transcribe.reset()} />
+      ) : null}
+      {transcribe.state.status === 'error' ? (
+        <TranscribeCard status="error" error={transcribe.state.error} onReset={() => transcribe.reset()} />
+      ) : null}
+    </>
+  ) : null;
+}
 ```
 
 > Note the cosmetic narrowing trick: inside the inner ternary the type-narrowing of `download.state.status === 'done'` is already established; we re-check inside the closure to satisfy TypeScript without restructuring.
@@ -2276,6 +2287,7 @@ git commit -m "feat(m4): render TranscribeCard chain after download completes"
 ### Task 16: Smoke test for the transcribe button
 
 **Files:**
+
 - Modify: `tests/renderer/NewJob.test.tsx`
 
 Add one test: after a successful download, the "전사 시작" button is visible and clicking it calls `transcribeFile`.
@@ -2295,9 +2307,7 @@ it('shows the STT 시작 button after download completes and triggers transcribe
   await user.click(screen.getByRole('button', { name: '다운로드' }));
   await waitFor(() => screen.getByRole('button', { name: 'STT 시작' }));
   await user.click(screen.getByRole('button', { name: 'STT 시작' }));
-  await waitFor(() =>
-    expect(calls.transcribeFile).toHaveBeenCalledWith('/tmp/dQw4w9WgXcQ.mp4'),
-  );
+  await waitFor(() => expect(calls.transcribeFile).toHaveBeenCalledWith('/tmp/dQw4w9WgXcQ.mp4'));
 });
 ```
 
@@ -2354,6 +2364,7 @@ git commit -m "test(m4): smoke test for 전사 시작 button after download done
 ### Task 17: DoD verification + manual integration check + branch finalize
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Run all DoD checks**
@@ -2380,6 +2391,7 @@ yarn dev
 ```
 
 In the app:
+
 1. Settings page — confirm `whisper.model` defaults to `small` (or pick `tiny` to make this fast).
 2. NewJob page — paste the original YouTube URL, click 미리보기, click 다운로드 (wait for completion).
 3. Click "전사 시작". Within ~30s (first run includes model download — could take longer for `small`) you should see progress events tick up.
