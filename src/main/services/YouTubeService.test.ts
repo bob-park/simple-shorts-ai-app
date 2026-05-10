@@ -108,6 +108,14 @@ describe('YouTubeService.download', () => {
     expect(args.some((a) => a.startsWith('--progress-template'))).toBe(true);
   });
 
+  it('pins format to h264 (avc1) + m4a in mp4 with sensible fallbacks', () => {
+    service.download('https://youtu.be/abc', '/tmp/V', { videoId: 'abc' });
+    const args = spawn.mock.calls[0]?.[1] as string[];
+    const fmtIdx = args.indexOf('--format');
+    expect(fmtIdx).toBeGreaterThanOrEqual(0);
+    expect(args[fmtIdx + 1]).toBe('bv*[vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4]/b');
+  });
+
   it('emits parsed progress events as yt-dlp writes lines', async () => {
     const handle = service.download('https://youtu.be/abc', '/tmp/abc', {
       videoId: 'abc',

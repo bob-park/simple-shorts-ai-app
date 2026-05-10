@@ -55,13 +55,29 @@ const PROGRESS_LINE = /^progress:\s*([\d.]+)%\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|
  */
 const PRINT_TEMPLATE = `after_move:%(filepath)s`;
 /**
- * Best video + best audio. We deliberately don't pin the container to mp4 —
- * YouTube increasingly serves AV1/VP9 in webm or mp4, and forcing mp4 either
- * triggers a remux (slow, lossy) or produces "mp4 wrapper, AV1 codec inside"
- * which fails on QuickTime. Letting yt-dlp pick the native format means the
- * file extension always matches the actual codec/container.
+ * Pin to h264 (avc1) video + AAC (m4a) audio. yt-dlp merges this codec
+ * pair to mp4 natively, which yields three wins on Apple Silicon:
+ *
+ * - macOS VideoToolbox hardware-decodes h264. VP9/AV1 (the typical webm
+ *   payload) have no VT decoder, so every downstream ffmpeg/cv2 pass is
+ *   software-decoded — much slower on the M-series chips we ship to.
+ * - The codec is constrained to avc1, so we don't risk the "AV1 inside
+ *   mp4 wrapper" QuickTime hazard that motivated the previous unpinned
+ *   selector.
+ * - File extension on disk is always .mp4, which matches downstream
+ *   tooling expectations.
+ *
+ * Fallback chain (yt-dlp evaluates left to right):
+ *   1. bv*[vcodec^=avc1]+ba[ext=m4a]  — adaptive avc1 video + m4a audio
+ *   2. b[ext=mp4]                     — pre-merged single mp4 stream
+ *   3. b                              — best of anything (rare videos
+ *      with only VP9/AV1 fall back to the prior behavior here)
+ *
+ * Trade-off: YouTube caps avc1 at 1080p, so a 4K source downgrades to
+ * 1080p. The pipeline final output is 1080×1920 (9:16 short), so this
+ * is invisible to end users.
  */
-const FORMAT_SELECTOR = 'bv*+ba/b';
+const FORMAT_SELECTOR = 'bv*[vcodec^=avc1]+ba[ext=m4a]/b[ext=mp4]/b';
 
 export class YouTubeService {
   constructor(private readonly deps: YouTubeServiceDeps) {}
