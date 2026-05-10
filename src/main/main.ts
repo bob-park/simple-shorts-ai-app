@@ -31,8 +31,8 @@ const isDev = !app.isPackaged;
 // Local LLM model identity — single source of truth for both extract:run's
 // on-demand download and Settings re-download.
 const LLM_MODEL_DIR = 'models';
-const LLM_MODEL_FILENAME = 'gemma-4-E4B-it-Q4_K_M.gguf';
-const LLM_MODEL_REPO = 'unsloth/gemma-4-E4B-it-GGUF';
+const LLM_MODEL_FILENAME = 'gemma-3-4b-it-Q4_K_M.gguf';
+const LLM_MODEL_REPO = 'unsloth/gemma-3-4b-it-GGUF';
 
 let settingsStore: SettingsStore;
 let youtubeService: YouTubeService;
