@@ -8,7 +8,7 @@ import { BrowserWindow, app, dialog, ipcMain, session, shell } from 'electron';
 import Store from 'electron-store';
 import { spawn } from 'node:child_process';
 import { existsSync, promises as fsPromises } from 'node:fs';
-import { basename, extname, join, resolve as resolvePath } from 'node:path';
+import { basename, extname, join, resolve as resolvePath, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import youtubeDl from 'youtube-dl-exec';
 
@@ -301,13 +301,20 @@ void app.whenReady().then(() => {
     downloads: app.getPath('downloads'),
     documents: app.getPath('documents'),
   });
+  // The downloader spawns yt-dlp directly (separate from youtube-dl-exec's
+  // default export); without an explicit path it would fall back to PATH
+  // lookup and fail with ENOENT in dev. Point it at the bundled binary.
+  // In packaged mode the binary lives under app.asar.unpacked/ — spawn() can't
+  // execute files inside the asar archive, so rewrite the path.
+  const ytdlpRawPath = (youtubeDl as unknown as { constants: { YOUTUBE_DL_PATH: string } }).constants
+    .YOUTUBE_DL_PATH;
+  const ytdlpBinaryPath = app.isPackaged
+    ? ytdlpRawPath.replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`)
+    : ytdlpRawPath;
   youtubeService = new YouTubeService({
     youtubeDl: youtubeDl as never,
     spawn: spawn as never,
-    // The downloader spawns yt-dlp directly (separate from youtube-dl-exec's
-    // default export); without an explicit path it would fall back to
-    // PATH lookup and fail with ENOENT in dev. Point it at the bundled binary.
-    binaryPath: (youtubeDl as unknown as { constants: { YOUTUBE_DL_PATH: string } }).constants.YOUTUBE_DL_PATH,
+    binaryPath: ytdlpBinaryPath,
   });
 
   // IPC handlers
