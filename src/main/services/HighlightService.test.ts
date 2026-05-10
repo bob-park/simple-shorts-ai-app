@@ -151,9 +151,7 @@ describe('HighlightService (segment-based, local LLM client)', () => {
 
   it('still drops highlights whose duration exceeds maxSec after expansion', async () => {
     chat.mockResolvedValue({
-      highlights: [
-        { segment_indices: Array.from({ length: 14 }, (_, i) => i), title: 'TooLong', hook: 'h' },
-      ],
+      highlights: [{ segment_indices: Array.from({ length: 14 }, (_, i) => i), title: 'TooLong', hook: 'h' }],
     });
     const result = await service.extract({
       transcript: makeTranscript(20),
