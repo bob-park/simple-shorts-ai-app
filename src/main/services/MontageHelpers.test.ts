@@ -38,13 +38,31 @@ describe('rebaseTrackingFrames', () => {
     ]);
   });
 
-  it('returns empty array if any segment has empty frames (caller falls back to center crop)', () => {
+  it('fills empty segments with neighbor anchor frames so the highlight stays face-tracked', () => {
     const segments: HighlightSegment[] = [
       { start_sec: 10, end_sec: 13 },
       { start_sec: 100, end_sec: 102 },
     ];
     const perSeg: TrackResult[] = [
       { sourceWidth: 1920, sourceHeight: 1080, frames: [{ t: 10, cx: 100, cy: 100 }] },
+      { sourceWidth: 1920, sourceHeight: 1080, frames: [] },
+    ];
+    // Seg 1 emits its own frame; Seg 2 (empty) gets two anchors at its boundaries
+    // using Seg 1's last position (cx=100, cy=100), montage time 3..5.
+    expect(rebaseTrackingFrames(segments, perSeg)).toEqual([
+      { t: 0, cx: 100, cy: 100 },
+      { t: 3, cx: 100, cy: 100 },
+      { t: 5, cx: 100, cy: 100 },
+    ]);
+  });
+
+  it('returns empty array only when every segment has zero detections', () => {
+    const segments: HighlightSegment[] = [
+      { start_sec: 10, end_sec: 13 },
+      { start_sec: 100, end_sec: 102 },
+    ];
+    const perSeg: TrackResult[] = [
+      { sourceWidth: 1920, sourceHeight: 1080, frames: [] },
       { sourceWidth: 1920, sourceHeight: 1080, frames: [] },
     ];
     expect(rebaseTrackingFrames(segments, perSeg)).toEqual([]);

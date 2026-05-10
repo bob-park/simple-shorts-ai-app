@@ -605,7 +605,7 @@ describe('RenderService with subtitles', () => {
     expect(cmdContent).toContain('4 crop@c x');
   });
 
-  it('multi-segment fallback to center crop when one segment has zero tracked frames', async () => {
+  it('still face-tracks the highlight when one segment has zero tracked frames (synthetic fill)', async () => {
     const writeFile = vi.fn(async (_p: string, _c: string, _e?: string) => undefined);
     const fs = { writeFile };
     let call = 0;
@@ -636,11 +636,10 @@ describe('RenderService with subtitles', () => {
     h._resolve();
     const result = await promise;
 
-    // Center-crop fallback (no sendcmd in args)
+    // Tracked path (sendcmd present, not center-only crop)
     const args: string[] = run.mock.calls[0]![0].args;
-    expect(args[args.indexOf('-vf') + 1]).toContain('crop=ih*9/16:ih');
-    expect(args[args.indexOf('-vf') + 1]).not.toContain('sendcmd');
-    expect(result.results[0]!.tracking).toBeNull();
+    expect(args[args.indexOf('-vf') + 1]).toContain('sendcmd');
+    expect(result.results[0]!.tracking).not.toBeNull();
   });
 
   it('multi-segment with subtitles rebases words across the montage timeline', async () => {

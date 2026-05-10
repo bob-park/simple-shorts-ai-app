@@ -63,18 +63,20 @@ def _default_reader(path: str) -> _ReaderLike:  # pragma: no cover - integration
             start_sec: float,
             end_sec: float | None,
         ) -> Iterator[tuple[float, Any]]:
-            self._cap.set(cv2.CAP_PROP_POS_MSEC, start_sec * 1000.0)
+            # Seek per sample instead of decoding every frame in [start, end].
+            # Old behaviour read every frame and yielded only at sample times,
+            # which on 1080p webm meant ~30× more decodes than needed and
+            # made face tracking the dominant cost in render. Per-sample seek
+            # uses the codec's keyframe index — much faster on long clips.
             interval = 1.0 / fps_sample
             current_t = start_sec
             while True:
                 if end_sec is not None and current_t > end_sec:
                     return
+                self._cap.set(cv2.CAP_PROP_POS_MSEC, current_t * 1000.0)
                 ok, frame = self._cap.read()
                 if not ok:
                     return
-                actual_t = self._cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
-                if actual_t < current_t:
-                    continue  # haven't reached the next sample yet
                 yield (current_t, frame)
                 current_t += interval
 
@@ -82,12 +84,76 @@ def _default_reader(path: str) -> _ReaderLike:  # pragma: no cover - integration
 
 
 def _default_detector() -> _DetectorLike:  # pragma: no cover - integration only
-    import mediapipe as mp
+    """Build a MediaPipe Tasks face detector and adapt its API to match the
+    legacy `mp.solutions.face_detection` shape this module was originally
+    written against.
 
-    return mp.solutions.face_detection.FaceDetection(
-        model_selection=1,  # 1 = full-range (works at any distance)
-        min_detection_confidence=0.5,
+    Why the adapter: MediaPipe 0.10.x removed the `mp.solutions` namespace,
+    so we now use `mp.tasks.vision.FaceDetector`. Its result format differs
+    (pixel-space `bounding_box`), so we wrap each Detection to expose the
+    old `.location_data.relative_bounding_box.{xmin,ymin,width,height}`
+    fractional shape — keeps the rest of the tracker (and unit tests, which
+    fake the legacy shape) untouched.
+    """
+    import os
+
+    import cv2
+    import mediapipe as mp
+    from mediapipe.tasks import python as mp_python
+    from mediapipe.tasks.python import vision
+
+    model_path = os.path.join(
+        os.path.dirname(__file__), "models", "blaze_face_short_range.tflite"
     )
+    base_opts = mp_python.BaseOptions(model_asset_path=model_path)
+    opts = vision.FaceDetectorOptions(base_options=base_opts, min_detection_confidence=0.5)
+    detector = vision.FaceDetector.create_from_options(opts)
+
+    class _RelBoxAdapter:
+        __slots__ = ("xmin", "ymin", "width", "height")
+
+        def __init__(self, x: float, y: float, w: float, h: float) -> None:
+            self.xmin, self.ymin, self.width, self.height = x, y, w, h
+
+    class _LocationDataAdapter:
+        __slots__ = ("relative_bounding_box",)
+
+        def __init__(self, rel: _RelBoxAdapter) -> None:
+            self.relative_bounding_box = rel
+
+    class _DetectionAdapter:
+        __slots__ = ("location_data",)
+
+        def __init__(self, loc: _LocationDataAdapter) -> None:
+            self.location_data = loc
+
+    class _ResultAdapter:
+        __slots__ = ("detections",)
+
+        def __init__(self, dets: list[_DetectionAdapter]) -> None:
+            self.detections = dets
+
+    class _TasksDetector:
+        def process(self, frame: Any) -> _ResultAdapter:
+            # The reader yields BGR uint8 frames (OpenCV default). The Tasks
+            # API expects mp.Image with SRGB layout.
+            h, w = frame.shape[:2]
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            res = detector.detect(mp_img)
+            adapted: list[_DetectionAdapter] = []
+            for d in res.detections or []:
+                bb = d.bounding_box  # pixel-space
+                rel = _RelBoxAdapter(
+                    x=bb.origin_x / w,
+                    y=bb.origin_y / h,
+                    w=bb.width / w,
+                    h=bb.height / h,
+                )
+                adapted.append(_DetectionAdapter(_LocationDataAdapter(rel)))
+            return _ResultAdapter(adapted)
+
+    return _TasksDetector()
 
 
 def _gaussian_kernel(window: int = 5, sigma: float = 1.0) -> list[float]:
@@ -132,6 +198,11 @@ class FaceTracker:
         self._reader_factory = reader_factory
         self._detector_factory = detector_factory
         self._kernel = _gaussian_kernel(smoothing_window, smoothing_sigma)
+        # Cache the detector across track() calls. Building it loads the
+        # tflite model + spins up a Metal GL context (~hundreds of ms each
+        # call), and a render with N highlights × M segments = N*M tracks
+        # — so a fresh detector per call dominates render time.
+        self._detector: _DetectorLike | None = None
 
     def track(
         self,
@@ -143,7 +214,9 @@ class FaceTracker:
     ) -> TrackResult:
         reader = self._reader_factory(video_path)
         width, height = reader.get_dimensions()
-        detector = self._detector_factory()
+        if self._detector is None:
+            self._detector = self._detector_factory()
+        detector = self._detector
 
         # First pass: collect raw (t, cx_frac, cy_frac) per sampled frame, with
         # `None` when the detector returns no faces. We forward-fill on the

@@ -90,6 +90,10 @@ sidecar/.mypy_cache/
 
 # M11: locally-downloaded GGUF models
 **/models/
+# Keep the MediaPipe face-detector model — small (~230KB), shipped with
+# sidecar source so face tracking works in dev and packaged.
+!sidecar/src/shorts_sidecar/models/
+!sidecar/src/shorts_sidecar/models/*
 
 # M12: build outputs and downloaded runtime artifacts
 build-resources/
