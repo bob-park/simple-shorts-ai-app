@@ -44,6 +44,7 @@ export function buildSendcmd(track: TrackResult, clipStartSec: number): string {
     const dt = b.t - a.t;
     if (dt <= 0) continue; // defensive — sampler is monotonic
     const steps = Math.floor(dt * EMIT_FPS);
+    if (steps === 0) continue; // pair closer than 1/EMIT_FPS — trailing emit covers the last frame; the upstream sampler always spaces keyframes far apart enough that this is unreachable in practice
     for (let s = 0; s < steps; s++) {
       const alpha = s / steps;
       const t = a.t + (b.t - a.t) * alpha;

@@ -125,4 +125,18 @@ describe('buildSendcmd', () => {
     };
     expect(() => buildSendcmd(portrait, 0)).toThrow(/already 9:16 or taller/i);
   });
+
+  it('skips a pair with duplicate timestamps (dt = 0) and still emits correctly', () => {
+    const out = buildSendcmd(
+      track([
+        { t: 0, cx: 960, cy: 540 },
+        { t: 0, cx: 800, cy: 540 }, // same timestamp — dt = 0, this pair is skipped
+        { t: 0.5, cx: 900, cy: 540 },
+      ]),
+      0,
+    );
+    const lines = parseLines(out);
+    // pair[0,1] skipped (dt=0); pair[1,2] emits 15 interpolated + trailing 1 = 16 lines.
+    expect(lines).toHaveLength(16);
+  });
 });
