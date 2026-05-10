@@ -4,7 +4,7 @@ import type { Settings } from '@shared/settings';
 import { TranscriptSchema, type Word } from '@shared/transcript';
 import { VideoMetaSchema, sanitizeFilename } from '@shared/youtube';
 import Database from 'better-sqlite3';
-import { BrowserWindow, Notification, app, dialog, ipcMain, session, shell } from 'electron';
+import { BrowserWindow, Notification, app, dialog, ipcMain, powerSaveBlocker, session, shell } from 'electron';
 import Store from 'electron-store';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, promises as fsPromises } from 'node:fs';
@@ -124,6 +124,27 @@ let historyRepo: HistoryRepo | null = null;
 let historyService: HistoryService | null = null;
 let resumeService: ResumeService | null = null;
 let setupWizard: SetupWizardService | null = null;
+
+/**
+ * Wrap a long-running IPC handler so macOS doesn't App-Nap the app (and its
+ * sidecar children) onto Efficiency cores while it runs. Without this,
+ * compute-heavy stages (STT, LLM extract, render) end up scheduled at
+ * background QoS and observed CPU drops to ~0.6 of a core even when the
+ * workload is multi-threaded — packaged GUI apps get this treatment more
+ * aggressively than CLI-launched dev builds.
+ *
+ * `prevent-app-suspension` is the lighter of the two power-save blockers —
+ * it does NOT keep the screen awake, only stops the system from suspending
+ * the app process tree.
+ */
+async function withPowerSaveBlocker<T>(fn: () => Promise<T>): Promise<T> {
+  const id = powerSaveBlocker.start('prevent-app-suspension');
+  try {
+    return await fn();
+  } finally {
+    powerSaveBlocker.stop(id);
+  }
+}
 
 /**
  * Show a desktop notification for a completed pipeline stage. Skipped when
@@ -398,7 +419,7 @@ void app.whenReady().then(() => {
 
   ipcMain.handle('youtube:fetchPreview', (_e, url: string) => youtubeService.fetchMeta(url));
 
-  ipcMain.handle('youtube:download', async (_e, url: string) => {
+  ipcMain.handle('youtube:download', (_e, url: string) => withPowerSaveBlocker(async () => {
     // Synchronous lock: prevents a second invocation from passing the guard
     // while we await fetchMeta below (the activeDownload assignment was async).
     if (activeDownload || downloadStarting) {
@@ -448,7 +469,7 @@ void app.whenReady().then(() => {
       activeDownload = null;
       downloadStarting = false; // also clears on early throw before handle was set
     }
-  });
+  }));
 
   ipcMain.handle('youtube:cancel', () => {
     activeDownload?.cancel();
@@ -458,7 +479,7 @@ void app.whenReady().then(() => {
     shell.showItemInFolder(absolutePath);
   });
 
-  ipcMain.handle('transcribe:run', async (_e, audioPath: string) => {
+  ipcMain.handle('transcribe:run', (_e, audioPath: string) => withPowerSaveBlocker(async () => {
     const fileLabel = basename(audioPath);
     try {
       const service = getTranscribeService();
@@ -475,7 +496,7 @@ void app.whenReady().then(() => {
       notifyStageComplete('자막 추출 실패', `${fileLabel}: ${(e as Error).message}`);
       throw e;
     }
-  });
+  }));
 
   ipcMain.handle('transcribe:cancel', async () => {
     if (transcribeService) await transcribeService.cancel();
@@ -490,7 +511,7 @@ void app.whenReady().then(() => {
     await shell.openPath(absolutePath);
   });
 
-  ipcMain.handle('extract:run', async (_e, audioPath: string) => {
+  ipcMain.handle('extract:run', (_e, audioPath: string) => withPowerSaveBlocker(async () => {
     if (extractInFlight) {
       throw new Error('An extraction is already in progress');
     }
@@ -540,7 +561,7 @@ void app.whenReady().then(() => {
     } finally {
       extractInFlight = false;
     }
-  });
+  }));
 
   ipcMain.handle('extract:cancel', () => {
     // M11: local LLM chat is uncancellable once dispatched.
@@ -570,7 +591,7 @@ void app.whenReady().then(() => {
     return sidecarLlmClient.modelStatus();
   });
 
-  ipcMain.handle('render:run', async (_e, audioPath: string) => {
+  ipcMain.handle('render:run', (_e, audioPath: string) => withPowerSaveBlocker(async () => {
     if (renderInFlight) {
       throw new Error('A render is already in progress');
     }
@@ -656,7 +677,7 @@ void app.whenReady().then(() => {
     } finally {
       renderInFlight = false;
     }
-  });
+  }));
 
   ipcMain.handle('render:cancel', () => {
     renderService?.cancel();
