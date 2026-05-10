@@ -20,6 +20,7 @@ import { SidecarLlmClient } from './infra/SidecarLlmClient';
 import { HighlightService } from './services/HighlightService';
 import { HistoryService } from './services/HistoryService';
 import { RenderService } from './services/RenderService';
+import { ResumeService } from './services/ResumeService';
 import { ThumbnailService } from './services/ThumbnailService';
 import { TrackingService } from './services/TrackingService';
 import { TranscribeService } from './services/TranscribeService';
@@ -55,6 +56,7 @@ let trackingService: TrackingService | null = null;
 
 let historyRepo: HistoryRepo | null = null;
 let historyService: HistoryService | null = null;
+let resumeService: ResumeService | null = null;
 
 function setupContentSecurityPolicy(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -199,6 +201,12 @@ function getHistoryService(): HistoryService {
     thumbsDir: join(app.getPath('userData'), 'thumbs'),
   });
   return historyService;
+}
+
+function getResumeService(): ResumeService {
+  if (resumeService) return resumeService;
+  resumeService = new ResumeService(settingsStore, fsPromises);
+  return resumeService;
 }
 
 void app.whenReady().then(() => {
@@ -369,6 +377,9 @@ void app.whenReady().then(() => {
     // The renderer's "취소" button is a no-op for now.
   });
 
+  ipcMain.handle('resume:detect', (_e, videoId: string) => getResumeService().detect(videoId));
+  ipcMain.handle('resume:hydrate', (_e, sourcePath: string) => getResumeService().hydrate(sourcePath));
+
   ipcMain.handle('llm:downloadModel', async () => {
     getHighlightService(); // ensures sidecarLlmClient is initialized
     if (!sidecarLlmClient) throw new Error('SidecarLlmClient not initialized');
@@ -525,5 +536,6 @@ app.on('window-all-closed', () => {
   historyRepo?._db.close();
   historyRepo = null;
   historyService = null;
+  resumeService = null;
   if (process.platform !== 'darwin') app.quit();
 });

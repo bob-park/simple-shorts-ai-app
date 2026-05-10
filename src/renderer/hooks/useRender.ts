@@ -15,6 +15,7 @@ export type UseRender = {
   status: RenderStatus | 'idle';
   start: (audioPath: string) => Promise<void>;
   cancel: () => Promise<void>;
+  hydrateDone: (audioPath: string, result: RenderResult) => void;
   reset: () => void;
 };
 
@@ -65,6 +66,11 @@ export function useRender(): UseRender {
     await window.api.cancelRender();
   }, []);
 
+  const hydrateDone = useCallback((audioPath: string, result: RenderResult) => {
+    abortRef.current = true;
+    setState({ status: 'done', audioPath, result });
+  }, []);
+
   const reset = useCallback(() => {
     // reset DOES set abortRef so the success path's late setState is ignored
     // — we want to discard the result entirely and return to 'idle'.
@@ -73,5 +79,5 @@ export function useRender(): UseRender {
     setState({ status: 'idle' });
   }, []);
 
-  return { state, status: state.status, start, cancel, reset };
+  return { state, status: state.status, start, cancel, hydrateDone, reset };
 }

@@ -26,6 +26,7 @@ export type UseHighlights = {
   status: HighlightState['status'];
   start: (audioPath: string) => Promise<void>;
   cancel: () => Promise<void>;
+  hydrateDone: (audioPath: string, highlightsPath: string, highlightSet: HighlightSet) => void;
   reset: () => void;
 };
 
@@ -97,11 +98,16 @@ export function useHighlights(): UseHighlights {
     await window.api.cancelExtract();
   }, []);
 
+  const hydrateDone = useCallback((audioPath: string, highlightsPath: string, highlightSet: HighlightSet) => {
+    abortRef.current = true; // any in-flight extraction's promise resolution will be ignored
+    setState({ status: 'done', audioPath, highlightsPath, highlightSet });
+  }, []);
+
   const reset = useCallback(() => {
     abortRef.current = true;
     void window.api.cancelExtract();
     setState({ status: 'idle' });
   }, []);
 
-  return { state, status: state.status, start, cancel, reset };
+  return { state, status: state.status, start, cancel, hydrateDone, reset };
 }

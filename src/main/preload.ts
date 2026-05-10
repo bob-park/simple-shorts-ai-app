@@ -58,6 +58,9 @@ const api: AppApi = {
     };
   },
 
+  resumeDetect: (videoId: string) => ipcRenderer.invoke('resume:detect', videoId),
+  resumeHydrate: (sourcePath: string) => ipcRenderer.invoke('resume:hydrate', sourcePath),
+
   renderShorts: (audioPath: string) => ipcRenderer.invoke('render:run', audioPath),
   cancelRender: () => ipcRenderer.invoke('render:cancel'),
   onRenderProgress: (callback: (p: RenderProgress) => void) => {

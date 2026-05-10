@@ -16,6 +16,7 @@ export type UseTranscribe = {
   status: TranscribeStatus;
   start: (audioPath: string) => Promise<void>;
   cancel: () => Promise<void>;
+  hydrateDone: (audioPath: string, transcriptPath: string, transcript: Transcript) => void;
   reset: () => void;
 };
 
@@ -57,9 +58,13 @@ export function useTranscribe(): UseTranscribe {
     await window.api.cancelTranscribe();
   }, []);
 
+  const hydrateDone = useCallback((audioPath: string, transcriptPath: string, transcript: Transcript) => {
+    setState({ status: 'done', audioPath, transcriptPath, transcript });
+  }, []);
+
   const reset = useCallback(() => {
     setState({ status: 'idle' });
   }, []);
 
-  return { state, status: state.status, start, cancel, reset };
+  return { state, status: state.status, start, cancel, hydrateDone, reset };
 }

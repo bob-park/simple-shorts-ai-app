@@ -11,6 +11,7 @@ export type VideoPreviewState =
 export type UseVideoPreview = {
   state: VideoPreviewState;
   fetch: (url: string) => Promise<void>;
+  hydrateLoaded: (url: string, meta: VideoMeta) => void;
   reset: () => void;
 };
 
@@ -28,9 +29,13 @@ export function useVideoPreview(): UseVideoPreview {
     }
   }, []);
 
+  const hydrateLoaded = useCallback((url: string, meta: VideoMeta) => {
+    setState({ status: 'loaded', url, meta });
+  }, []);
+
   const reset = useCallback(() => {
     setState({ status: 'idle' });
   }, []);
 
-  return { state, fetch, reset };
+  return { state, fetch, hydrateLoaded, reset };
 }

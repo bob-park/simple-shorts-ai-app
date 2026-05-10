@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 
+import { useNewJobState } from '@renderer/components/NewJobStateContext';
 import type { JobDetail } from '@shared/history';
+import { useNavigate } from 'react-router-dom';
 
 interface Props {
   jobId: string | null;
@@ -10,6 +12,20 @@ interface Props {
 
 export function JobDetailDrawer({ jobId, onClose, onDelete }: Props) {
   const [detail, setDetail] = useState<JobDetail | null>(null);
+  const navigate = useNavigate();
+  const { hydrate } = useNewJobState();
+
+  async function handleResume() {
+    if (!detail?.job.sourcePath) return;
+    const snap = await window.api.resumeHydrate(detail.job.sourcePath);
+    if (snap) {
+      hydrate(snap);
+      navigate('/');
+      onClose();
+    }
+    // Source file gone or meta corrupt → silently bail; user stays on history.
+    // (Future: show a toast.)
+  }
 
   useEffect(() => {
     if (!jobId) {
@@ -53,6 +69,13 @@ export function JobDetailDrawer({ jobId, onClose, onDelete }: Props) {
               ))}
             </ol>
             <div className="gap-sm flex">
+              <button
+                type="button"
+                onClick={() => void handleResume()}
+                className="bg-primary px-xl text-button-md text-on-primary h-10 rounded-full font-semibold"
+              >
+                이어서 작업
+              </button>
               <button
                 type="button"
                 onClick={() => {
