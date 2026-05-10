@@ -1,3 +1,4 @@
+import { NewJobStateProvider } from '@renderer/components/NewJobStateContext';
 import { NewJobPage } from '@renderer/pages/NewJob';
 import type { VideoMeta } from '@shared/youtube';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -95,7 +96,11 @@ describe('NewJobPage', () => {
 
   it('keeps the 미리보기 button disabled until a valid YouTube URL is typed', async () => {
     const user = userEvent.setup();
-    render(<NewJobPage />);
+    render(
+      <NewJobStateProvider>
+        <NewJobPage />
+      </NewJobStateProvider>,
+    );
     const button = screen.getByRole('button', { name: '미리보기' });
     expect(button).toBeDisabled();
     await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
@@ -104,7 +109,11 @@ describe('NewJobPage', () => {
 
   it('shows the preview card after a successful fetch', async () => {
     const user = userEvent.setup();
-    render(<NewJobPage />);
+    render(
+      <NewJobStateProvider>
+        <NewJobPage />
+      </NewJobStateProvider>,
+    );
     await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
     await user.click(screen.getByRole('button', { name: '미리보기' }));
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Never Gonna Give You Up' })).toBeInTheDocument());
@@ -115,7 +124,11 @@ describe('NewJobPage', () => {
   it('clicking 다운로드 calls window.api.downloadVideo with the previewed URL', async () => {
     const calls = installApiMock();
     const user = userEvent.setup();
-    render(<NewJobPage />);
+    render(
+      <NewJobStateProvider>
+        <NewJobPage />
+      </NewJobStateProvider>,
+    );
     await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
     await user.click(screen.getByRole('button', { name: '미리보기' }));
     await waitFor(() => screen.getByRole('button', { name: '다운로드' }));
@@ -126,7 +139,11 @@ describe('NewJobPage', () => {
   it('shows the STT 시작 button after download completes and triggers transcribeFile on click', async () => {
     const calls = installApiMock();
     const user = userEvent.setup();
-    render(<NewJobPage />);
+    render(
+      <NewJobStateProvider>
+        <NewJobPage />
+      </NewJobStateProvider>,
+    );
     await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
     await user.click(screen.getByRole('button', { name: '미리보기' }));
     await waitFor(() => screen.getByRole('button', { name: '다운로드' }));
@@ -139,7 +156,11 @@ describe('NewJobPage', () => {
   it('shows the 하이라이트 추출 button after transcribe completes and triggers extractHighlights on click', async () => {
     const calls = installApiMock();
     const user = userEvent.setup();
-    render(<NewJobPage />);
+    render(
+      <NewJobStateProvider>
+        <NewJobPage />
+      </NewJobStateProvider>,
+    );
     await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
     await user.click(screen.getByRole('button', { name: '미리보기' }));
     await waitFor(() => screen.getByRole('button', { name: '다운로드' }));
@@ -154,7 +175,11 @@ describe('NewJobPage', () => {
   it('shows the 숏츠 만들기 button after highlights complete and triggers renderShorts on click', async () => {
     const calls = installApiMock();
     const user = userEvent.setup();
-    render(<NewJobPage />);
+    render(
+      <NewJobStateProvider>
+        <NewJobPage />
+      </NewJobStateProvider>,
+    );
     await user.type(screen.getByRole('textbox'), 'https://youtu.be/dQw4w9WgXcQ');
     await user.click(screen.getByRole('button', { name: '미리보기' }));
     await waitFor(() => screen.getByRole('button', { name: '다운로드' }));

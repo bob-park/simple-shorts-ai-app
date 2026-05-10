@@ -1,21 +1,13 @@
+import { useNewJobState } from '@renderer/components/NewJobStateContext';
 import { DownloadProgress } from '@renderer/components/newjob/DownloadProgress';
 import { HighlightCard } from '@renderer/components/newjob/HighlightCard';
 import { PreviewCard } from '@renderer/components/newjob/PreviewCard';
 import { RenderCard } from '@renderer/components/newjob/RenderCard';
 import { TranscribeCard } from '@renderer/components/newjob/TranscribeCard';
 import { UrlInput } from '@renderer/components/newjob/UrlInput';
-import { useDownload } from '@renderer/hooks/useDownload';
-import { useHighlights } from '@renderer/hooks/useHighlights';
-import { useRender } from '@renderer/hooks/useRender';
-import { useTranscribe } from '@renderer/hooks/useTranscribe';
-import { useVideoPreview } from '@renderer/hooks/useVideoPreview';
 
 export function NewJobPage() {
-  const preview = useVideoPreview();
-  const download = useDownload();
-  const transcribe = useTranscribe();
-  const highlights = useHighlights();
-  const renderShort = useRender();
+  const { preview, download, transcribe, highlights, renderShort } = useNewJobState();
 
   const downloadInFlight = download.status === 'starting' || download.status === 'downloading';
 
