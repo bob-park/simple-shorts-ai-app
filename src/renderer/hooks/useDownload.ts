@@ -15,6 +15,7 @@ export type UseDownload = {
   status: DownloadStatus;
   start: (url: string) => Promise<void>;
   cancel: () => Promise<void>;
+  hydrateDone: (url: string, outputPath: string) => void;
   reset: () => void;
 };
 
@@ -51,10 +52,15 @@ export function useDownload(): UseDownload {
     await window.api.cancelDownload();
   }, []);
 
+  const hydrateDone = useCallback((url: string, outputPath: string) => {
+    urlRef.current = url;
+    setState({ status: 'done', url, outputPath });
+  }, []);
+
   const reset = useCallback(() => {
     urlRef.current = null;
     setState({ status: 'idle' });
   }, []);
 
-  return { state, status: state.status, start, cancel, reset };
+  return { state, status: state.status, start, cancel, hydrateDone, reset };
 }
