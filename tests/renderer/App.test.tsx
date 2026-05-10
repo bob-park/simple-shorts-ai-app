@@ -58,6 +58,9 @@ beforeAll(() => {
     historyDelete: vi.fn(async () => undefined),
     resumeDetect: vi.fn(async (_id: string) => null),
     resumeHydrate: vi.fn(async (_p: string) => null),
+    setupStatus: vi.fn(async () => 'ready' as const),
+    setupRun: vi.fn(async () => undefined),
+    onSetupProgress: vi.fn(() => () => undefined),
   } satisfies Window['api'];
 });
 

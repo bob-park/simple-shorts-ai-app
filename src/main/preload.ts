@@ -3,6 +3,7 @@ import type { HistoryListQuery } from '@shared/history';
 import type { AppApi } from '@shared/ipc';
 import type { RenderProgress } from '@shared/render';
 import type { Settings } from '@shared/settings';
+import type { SetupProgress } from '@shared/setup';
 import type { TranscribeProgress } from '@shared/transcribe';
 import type { DownloadProgress } from '@shared/youtube';
 import { contextBridge, ipcRenderer } from 'electron';
@@ -74,6 +75,16 @@ const api: AppApi = {
   historyList: (query: HistoryListQuery) => ipcRenderer.invoke('history:list', query),
   historyGetDetail: (jobId: string) => ipcRenderer.invoke('history:getDetail', jobId),
   historyDelete: (jobId: string) => ipcRenderer.invoke('history:delete', jobId),
+
+  setupStatus: () => ipcRenderer.invoke('setup:status'),
+  setupRun: () => ipcRenderer.invoke('setup:run'),
+  onSetupProgress: (callback: (p: SetupProgress) => void) => {
+    const handler = (_e: Electron.IpcRendererEvent, data: SetupProgress) => callback(data);
+    ipcRenderer.on('setup:progress', handler);
+    return () => {
+      ipcRenderer.off('setup:progress', handler);
+    };
+  },
 
   revealInFolder: (absolutePath: string) => ipcRenderer.invoke('shell:reveal', absolutePath),
   openPath: (absolutePath: string) => ipcRenderer.invoke('shell:openPath', absolutePath),

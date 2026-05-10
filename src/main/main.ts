@@ -7,7 +7,7 @@ import Database from 'better-sqlite3';
 import { BrowserWindow, app, dialog, ipcMain, session, shell } from 'electron';
 import Store from 'electron-store';
 import { spawn } from 'node:child_process';
-import { promises as fsPromises } from 'node:fs';
+import { existsSync, promises as fsPromises } from 'node:fs';
 import { basename, extname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import youtubeDl from 'youtube-dl-exec';
@@ -21,6 +21,7 @@ import { HighlightService } from './services/HighlightService';
 import { HistoryService } from './services/HistoryService';
 import { RenderService } from './services/RenderService';
 import { ResumeService } from './services/ResumeService';
+import { SetupWizardService } from './services/SetupWizardService';
 import { ThumbnailService } from './services/ThumbnailService';
 import { TrackingService } from './services/TrackingService';
 import { TranscribeService } from './services/TranscribeService';
@@ -28,6 +29,51 @@ import { type DownloadHandle, YouTubeService } from './services/YouTubeService';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const isDev = !app.isPackaged;
+
+interface RuntimePaths {
+  uvBinary: string;
+  pythonRuntime: string;
+  venvPath: string;
+  requirementsPath: string;
+  ffmpegBinary: string;
+  sidecarCwd: string;
+  /**
+   * In packaged mode, sidecar is launched as the venv's python directly;
+   * in dev mode, `uv run python -m shorts_sidecar` (which auto-resolves the
+   * venv via uv).
+   */
+  sidecarSpawn: { command: string; args: string[] };
+}
+
+function resolveRuntimePaths(): RuntimePaths {
+  if (app.isPackaged) {
+    const r = process.resourcesPath;
+    const venvPath = join(app.getPath('userData'), 'sidecar-venv');
+    return {
+      uvBinary: join(r, 'uv'),
+      pythonRuntime: join(r, 'python-runtime', 'bin', 'python3.11'),
+      venvPath,
+      requirementsPath: join(r, 'requirements.txt'),
+      ffmpegBinary: join(r, 'ffmpeg'),
+      sidecarCwd: r,
+      sidecarSpawn: {
+        command: join(venvPath, 'bin', 'python'),
+        args: ['-m', 'shorts_sidecar'],
+      },
+    };
+  }
+  // Dev mode — same behavior as before
+  const repoRoot = resolvePath(__dirname, '../../');
+  return {
+    uvBinary: 'uv',
+    pythonRuntime: 'python3.11',
+    venvPath: join(repoRoot, 'sidecar', '.venv'),
+    requirementsPath: join(repoRoot, 'sidecar', 'requirements.txt'),
+    ffmpegBinary: 'ffmpeg',
+    sidecarCwd: join(repoRoot, 'sidecar'),
+    sidecarSpawn: { command: 'uv', args: ['run', 'python', '-m', 'shorts_sidecar'] },
+  };
+}
 
 // Local LLM model identity — single source of truth for both extract:run's
 // on-demand download and Settings re-download.
@@ -57,6 +103,7 @@ let trackingService: TrackingService | null = null;
 let historyRepo: HistoryRepo | null = null;
 let historyService: HistoryService | null = null;
 let resumeService: ResumeService | null = null;
+let setupWizard: SetupWizardService | null = null;
 
 function setupContentSecurityPolicy(): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -116,13 +163,13 @@ function createMainWindow(): BrowserWindow {
 
 function getTranscribeService(): TranscribeService {
   if (transcribeService) return transcribeService;
-  const repoRoot = resolvePath(__dirname, '../../');
+  const paths = resolveRuntimePaths();
   const modelsDir = join(app.getPath('userData'), 'whisper-models');
   pythonSidecar = new PythonSidecar({
     spawn,
-    command: 'uv',
-    args: ['run', 'python', '-m', 'shorts_sidecar'],
-    cwd: join(repoRoot, 'sidecar'),
+    command: paths.sidecarSpawn.command,
+    args: paths.sidecarSpawn.args,
+    cwd: paths.sidecarCwd,
     env: { HF_HOME: modelsDir },
   });
   transcribeService = new TranscribeService(pythonSidecar);
@@ -161,7 +208,11 @@ function getHighlightService(): HighlightService {
 
 function getRenderService(): RenderService {
   if (renderService) return renderService;
-  ffmpegRunner = new FfmpegRunner({ spawn });
+  const paths = resolveRuntimePaths();
+  ffmpegRunner = new FfmpegRunner({
+    spawn,
+    command: app.isPackaged && existsSync(paths.ffmpegBinary) ? paths.ffmpegBinary : 'ffmpeg',
+  });
   // Tracking goes through the same Python sidecar that owns transcribe (lazy
   // boot on first call). Reuse the existing PythonSidecar instance if it's
   // already been spun up by transcribe; otherwise this triggers it.
@@ -192,7 +243,11 @@ function getHistoryRepo(): HistoryRepo {
 function getHistoryService(): HistoryService {
   if (historyService) return historyService;
   if (!ffmpegRunner) {
-    ffmpegRunner = new FfmpegRunner({ spawn });
+    const paths = resolveRuntimePaths();
+    ffmpegRunner = new FfmpegRunner({
+      spawn,
+      command: app.isPackaged && existsSync(paths.ffmpegBinary) ? paths.ffmpegBinary : 'ffmpeg',
+    });
   }
   const thumbnails = new ThumbnailService(ffmpegRunner);
   historyService = new HistoryService({
@@ -207,6 +262,26 @@ function getResumeService(): ResumeService {
   if (resumeService) return resumeService;
   resumeService = new ResumeService(settingsStore, fsPromises);
   return resumeService;
+}
+
+function getSetupWizard(): SetupWizardService {
+  if (setupWizard) return setupWizard;
+  const paths = resolveRuntimePaths();
+  setupWizard = new SetupWizardService({
+    uvBinary: paths.uvBinary,
+    pythonRuntime: paths.pythonRuntime,
+    venvPath: paths.venvPath,
+    requirementsPath: paths.requirementsPath,
+    spawn,
+    fs: { access: fsPromises.access },
+  });
+  setupWizard.onProgress((p) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('setup:progress', p);
+    }
+  });
+  return setupWizard;
 }
 
 void app.whenReady().then(() => {
@@ -510,6 +585,9 @@ void app.whenReady().then(() => {
     }
   });
 
+  ipcMain.handle('setup:status', () => getSetupWizard().status());
+  ipcMain.handle('setup:run', () => getSetupWizard().run());
+
   createMainWindow();
 
   app.on('activate', () => {
@@ -537,5 +615,6 @@ app.on('window-all-closed', () => {
   historyRepo = null;
   historyService = null;
   resumeService = null;
+  setupWizard = null;
   if (process.platform !== 'darwin') app.quit();
 });

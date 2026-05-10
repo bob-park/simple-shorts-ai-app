@@ -4,6 +4,7 @@ import type { HistoryListQuery, JobDetail, JobSummary } from './history';
 import type { RenderProgress, RenderResult } from './render';
 import type { ResumeSnapshot } from './resume';
 import type { Settings } from './settings';
+import type { SetupProgress, SetupStatus } from './setup';
 import type { TranscribeProgress } from './transcribe';
 import type { Transcript } from './transcript';
 import type { DownloadProgress, VideoMeta } from './youtube';
@@ -71,6 +72,10 @@ export interface AppApi {
   historyGetDetail(jobId: string): Promise<JobDetail | null>;
   /** Permanently delete a job + its shorts + thumbnails. */
   historyDelete(jobId: string): Promise<void>;
+
+  setupStatus(): Promise<SetupStatus>;
+  setupRun(): Promise<void>;
+  onSetupProgress(callback: (p: SetupProgress) => void): () => void;
 
   /** Status of the local Gemma model file on disk. */
   llmModelStatus(): Promise<{ exists: boolean; sizeBytes: number; loaded: boolean }>;
