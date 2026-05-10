@@ -131,18 +131,35 @@ export class HighlightService {
     }
 
     const finalHighlights: Highlight[] = [];
+    const allSrcSegments = opts.transcript.segments;
     for (const c of finalCandidates) {
       const uniqueIndices = Array.from(new Set(c.segment_indices));
-      const inBounds = uniqueIndices.every((i) => i >= 0 && i < opts.transcript.segments.length);
+      const inBounds = uniqueIndices.every((i) => i >= 0 && i < allSrcSegments.length);
       if (!inBounds) continue;
-      const segments = uniqueIndices
-        .map((i) => ({
-          start_sec: opts.transcript.segments[i]!.start,
-          end_sec: opts.transcript.segments[i]!.end,
-        }))
-        .sort((a, b) => a.start_sec - b.start_sec);
-      const total = segments.reduce((acc, s) => acc + (s.end_sec - s.start_sec), 0);
+      const initialTotal = uniqueIndices.reduce(
+        (acc, i) => acc + (allSrcSegments[i]!.end - allSrcSegments[i]!.start),
+        0,
+      );
+      // Expand the LLM's pick by adding nearest-neighbor source segments until
+      // total duration ≥ minSec. Without this, Gemma 3 4B tends to pick the
+      // bare minimum and the post-filter drops the whole highlight, leaving
+      // the user with 0 results when minSec is set higher than the segment
+      // average. Expansion preserves the LLM's narrative intent (kept indices
+      // are unchanged; we only add adjacent context) while guaranteeing the
+      // output meets the duration window.
+      const { indices: pickedSet, total } = expandToMinSec(
+        new Set(uniqueIndices),
+        allSrcSegments,
+        initialTotal,
+        opts.minSec,
+      );
       if (total < opts.minSec || total > opts.maxSec) continue;
+      const segments = Array.from(pickedSet)
+        .sort((a, b) => a - b)
+        .map((i) => ({
+          start_sec: allSrcSegments[i]!.start,
+          end_sec: allSrcSegments[i]!.end,
+        }));
       const candidate = { segments, title: c.title, hook: c.hook };
       const validated = HighlightSchema.safeParse(candidate);
       if (validated.success) finalHighlights.push(validated.data);
@@ -159,6 +176,47 @@ export class HighlightService {
   private emitProgress(p: ExtractProgress): void {
     for (const h of this.progressHandlers) h(p);
   }
+}
+
+/**
+ * Grow a highlight's segment selection by adding nearest-neighbor source
+ * segments until total duration ≥ minSec. Tie-break by index order so the
+ * result is deterministic.
+ *
+ * Distance metric is `|i - p|` over picked indices — inserts segments
+ * closest to existing picks first (gap-fillers before far-boundary
+ * extensions). If the transcript can't reach minSec at all (whole video
+ * shorter than minSec), the loop still terminates and returns whatever
+ * total it could reach; the caller drops it.
+ */
+function expandToMinSec(
+  pickedIndices: Set<number>,
+  segments: Segment[],
+  currentTotal: number,
+  minSec: number,
+): { indices: Set<number>; total: number } {
+  if (currentTotal >= minSec) return { indices: pickedIndices, total: currentTotal };
+
+  const candidates: { idx: number; dist: number }[] = [];
+  for (let i = 0; i < segments.length; i++) {
+    if (pickedIndices.has(i)) continue;
+    let minDist = Infinity;
+    for (const p of pickedIndices) {
+      const d = Math.abs(i - p);
+      if (d < minDist) minDist = d;
+    }
+    candidates.push({ idx: i, dist: minDist });
+  }
+  candidates.sort((a, b) => a.dist - b.dist || a.idx - b.idx);
+
+  const expanded = new Set(pickedIndices);
+  let total = currentTotal;
+  for (const { idx } of candidates) {
+    expanded.add(idx);
+    total += segments[idx]!.end - segments[idx]!.start;
+    if (total >= minSec) break;
+  }
+  return { indices: expanded, total };
 }
 
 function formatChunkPrompt(chunk: ChunkRange): string {

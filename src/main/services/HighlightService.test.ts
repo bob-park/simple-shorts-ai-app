@@ -127,22 +127,44 @@ describe('HighlightService (segment-based, local LLM client)', () => {
     expect(result.highlights[0]!.title).toBe('Valid');
   });
 
-  it('drops highlights whose total duration falls outside [minSec, maxSec]', async () => {
+  it('expands short LLM picks by adding nearest-neighbor segments until total ≥ minSec', async () => {
+    // 20 segments × 5s each. minSec=20 requires ≥4 segments. LLM picked only 1.
+    chat.mockResolvedValue({
+      highlights: [{ segment_indices: [0], title: 'Seed', hook: 'h' }],
+    });
+    const result = await service.extract({
+      transcript: makeTranscript(20),
+      audioPath: '/x.mp4',
+      count: 1,
+      minSec: 20,
+      maxSec: 60,
+    });
+    expect(result.highlights).toHaveLength(1);
+    // Expansion grows outward from seed index 0: nearest unpicked is 1, then 2, then 3.
+    expect(result.highlights[0]!.segments).toEqual([
+      { start_sec: 0, end_sec: 5 },
+      { start_sec: 5, end_sec: 10 },
+      { start_sec: 10, end_sec: 15 },
+      { start_sec: 15, end_sec: 20 },
+    ]);
+  });
+
+  it('still drops highlights whose duration exceeds maxSec after expansion', async () => {
     chat.mockResolvedValue({
       highlights: [
-        { segment_indices: [0], title: 'TooShort', hook: 'h' },
-        { segment_indices: [0, 1, 2, 3, 4], title: 'Good', hook: 'h' },
         { segment_indices: Array.from({ length: 14 }, (_, i) => i), title: 'TooLong', hook: 'h' },
       ],
     });
     const result = await service.extract({
       transcript: makeTranscript(20),
       audioPath: '/x.mp4',
-      count: 5,
-      minSec: 20,
+      count: 1,
+      minSec: 5,
       maxSec: 60,
     });
-    expect(result.highlights.map((h) => h.title)).toEqual(['Good']);
+    // 14 × 5s = 70s > maxSec=60. Expansion only fires when total < minSec, so
+    // an already-too-long highlight bypasses expansion and hits the maxSec drop.
+    expect(result.highlights).toEqual([]);
   });
 
   it('rebases chunk-local indices to global when running multi-chunk + rerank', async () => {
