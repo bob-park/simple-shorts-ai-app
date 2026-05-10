@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from typing import Any, Callable
 
 from huggingface_hub import hf_hub_download
@@ -93,17 +94,10 @@ class LlmEngine:
         except Exception:
             raise
         finally:
-            # Best-effort dir cleanup — remove any leftover files + the dir
-            try:
-                if os.path.isdir(partial_dir):
-                    for entry in os.listdir(partial_dir):
-                        try:
-                            os.unlink(os.path.join(partial_dir, entry))
-                        except OSError:
-                            pass
-                    os.rmdir(partial_dir)
-            except OSError:
-                pass
+            # Best-effort recursive cleanup. huggingface_hub creates a `.cache/`
+            # subdirectory inside `local_dir` for staging metadata, so naive
+            # unlink+rmdir leaves a non-empty dir behind on success.
+            shutil.rmtree(partial_dir, ignore_errors=True)
 
     # Pre-compile grammars at first use (lazy so tests can patch).
     _grammars: dict[str, Any] = {}

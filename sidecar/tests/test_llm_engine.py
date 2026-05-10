@@ -69,6 +69,35 @@ def test_download_model_writes_then_atomically_renames(tmp_path, monkeypatch):
     assert progress_calls[1][0] > 0
 
 
+def test_download_model_cleans_up_partial_with_nested_subdir_on_success(tmp_path, monkeypatch):
+    """huggingface_hub creates a `.cache/` subdir inside local_dir; cleanup
+    must remove it recursively so partial-dir doesn't leak after success."""
+    engine = LlmEngine()
+    model_path = str(tmp_path / "model.gguf")
+    partial_dir = model_path + ".partial-dir"
+
+    def fake_hf_with_cache_dir(*, repo_id, filename, local_dir, **kwargs):
+        out = Path(local_dir) / filename
+        out.write_bytes(b"FAKE_GGUF")
+        # Simulate hf's `.cache/` staging directory
+        cache_dir = Path(local_dir) / ".cache"
+        cache_dir.mkdir()
+        (cache_dir / "metadata.json").write_text("{}")
+        return str(out)
+
+    import shorts_sidecar.llm_engine as eng
+    monkeypatch.setattr(eng, "hf_hub_download", fake_hf_with_cache_dir)
+
+    engine.download_model(
+        model_path=model_path,
+        repo="unsloth/gemma-3-4b-it-GGUF",
+        filename="gemma-3-4b-it-Q4_K_M.gguf",
+        progress_callback=lambda *_: None,
+    )
+    assert os.path.exists(model_path)
+    assert not os.path.exists(partial_dir), "partial-dir + nested .cache must be fully removed"
+
+
 def test_download_model_cleans_up_partial_on_exception(tmp_path, monkeypatch):
     """If hf_hub_download raises, the .partial-dir contents must be deleted."""
     engine = LlmEngine()
