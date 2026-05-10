@@ -191,6 +191,49 @@ describe('ResumeService.hydrate (real fs)', () => {
       await rm(out, { recursive: true, force: true });
     }
   });
+
+  it('orders short_*.mp4 files numerically (short_2 before short_10)', async () => {
+    const { dl, cleanup } = await withTempDl();
+    const out = await mkdtemp(join(tmpdir(), 'resume-out-'));
+    try {
+      const sourcePath = join(dl, 'video.webm');
+      await writeFile(sourcePath, 'fake');
+      await writeFile(`${sourcePath}.meta.json`, JSON.stringify(baseMeta));
+      // 10 highlights so we can reference index 0..9
+      const highlights = Array.from({ length: 10 }, (_, i) => ({
+        segments: [{ start_sec: i * 5, end_sec: i * 5 + 5 }],
+        title: `H${i + 1}`,
+        hook: `h${i + 1}`,
+      }));
+      await writeFile(
+        `${sourcePath}.highlights.json`,
+        JSON.stringify({
+          generatedAt: '2026-05-10T00:00:00Z',
+          model: 'gemma-3-4b',
+          audioPath: sourcePath,
+          highlights,
+        }),
+      );
+      const stemOut = join(out, 'video');
+      await fsPromises.mkdir(stemOut, { recursive: true });
+      // Write 10 mp4s — lexicographic order would be short_1, short_10, short_2, ...
+      for (let i = 1; i <= 10; i++) {
+        await writeFile(join(stemOut, `short_${i}.mp4`), `mp4-${i}`);
+      }
+      const svc = new ResumeService({ get: () => ({ paths: { downloads: dl, outputs: out } }) }, fsPromises);
+      const snap = await svc.hydrate(sourcePath);
+      // Result[0] must be short_1.mp4 / H1, Result[1] → short_2.mp4 / H2, etc.
+      expect(snap!.render!.result.results.map((r) => r.outputPath)).toEqual(
+        Array.from({ length: 10 }, (_, i) => join(stemOut, `short_${i + 1}.mp4`)),
+      );
+      expect(snap!.render!.result.results.map((r) => r.title)).toEqual(
+        Array.from({ length: 10 }, (_, i) => `H${i + 1}`),
+      );
+    } finally {
+      await cleanup();
+      await rm(out, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('ResumeService.detect (real fs)', () => {

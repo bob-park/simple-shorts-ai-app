@@ -132,7 +132,11 @@ export class ResumeService {
     } catch {
       return undefined;
     }
-    const shorts = files.filter((f) => /^short_\d+\.mp4$/.test(f)).sort();
+    const shorts = files
+      .filter((f) => /^short_\d+\.mp4$/.test(f))
+      .sort(
+        (a, b) => parseInt(a.match(/^short_(\d+)\.mp4$/)![1]!, 10) - parseInt(b.match(/^short_(\d+)\.mp4$/)![1]!, 10),
+      );
     if (shorts.length === 0) return undefined;
     const results: RenderClipResult[] = shorts.map((file, idx) => {
       const highlight = highlightSet.highlights[idx];
