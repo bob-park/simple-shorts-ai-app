@@ -31,6 +31,8 @@ extraResources:
     to: ffmpeg
   - from: sidecar/requirements.txt
     to: requirements.txt
+  - from: sidecar/src
+    to: sidecar-src
 dmg:
   title: Shorts AI ${version}
   iconSize: 128

@@ -43,6 +43,12 @@ interface RuntimePaths {
    * venv via uv).
    */
   sidecarSpawn: { command: string; args: string[] };
+  /**
+   * Extra env vars for the sidecar spawn. In packaged mode, PYTHONPATH points
+   * at the bundled `shorts_sidecar` package source so `python -m shorts_sidecar`
+   * resolves it (uv pip install only installs deps, not our own package).
+   */
+  sidecarEnv: Record<string, string>;
 }
 
 function resolveRuntimePaths(): RuntimePaths {
@@ -60,6 +66,7 @@ function resolveRuntimePaths(): RuntimePaths {
         command: join(venvPath, 'bin', 'python'),
         args: ['-m', 'shorts_sidecar'],
       },
+      sidecarEnv: { PYTHONPATH: join(r, 'sidecar-src') },
     };
   }
   // Dev mode — same behavior as before
@@ -72,6 +79,7 @@ function resolveRuntimePaths(): RuntimePaths {
     ffmpegBinary: 'ffmpeg',
     sidecarCwd: join(repoRoot, 'sidecar'),
     sidecarSpawn: { command: 'uv', args: ['run', 'python', '-m', 'shorts_sidecar'] },
+    sidecarEnv: {},
   };
 }
 
@@ -170,7 +178,7 @@ function getTranscribeService(): TranscribeService {
     command: paths.sidecarSpawn.command,
     args: paths.sidecarSpawn.args,
     cwd: paths.sidecarCwd,
-    env: { HF_HOME: modelsDir },
+    env: { HF_HOME: modelsDir, ...paths.sidecarEnv },
   });
   transcribeService = new TranscribeService(pythonSidecar);
 
