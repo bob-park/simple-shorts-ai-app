@@ -351,7 +351,11 @@ void app.whenReady().then(() => {
     youtubeDl: ytdlpFn as never,
     spawn: spawn as never,
     binaryPath: ytdlpBinaryPath,
-    ffmpegLocation: runtimePathsBoot.ffmpegBinary,
+    // yt-dlp's --ffmpeg-location wants a path, not a name — passing 'ffmpeg'
+    // would resolve it relative to CWD, not search PATH. Only pass it in
+    // packaged mode where we have an absolute bundled-ffmpeg path; in dev,
+    // let yt-dlp do its own PATH lookup.
+    ffmpegLocation: app.isPackaged ? runtimePathsBoot.ffmpegBinary : undefined,
   });
 
   // IPC handlers
