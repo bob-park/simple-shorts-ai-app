@@ -1,0 +1,44 @@
+appId: com.bobpark.shorts-ai
+productName: Shorts AI
+copyright: Copyright (c) 2026 Bob Park
+directories:
+  output: out
+files:
+  - out/main/**
+  - out/preload/**
+  - out/renderer/**
+  - package.json
+  - '!**/*.test.*'
+  - '!**/__tests__/**'
+asar: true
+asarUnpack:
+  # better-sqlite3 has a native .node binding that can't run from inside asar
+  - '**/node_modules/better-sqlite3/**'
+mac:
+  category: public.app-category.video
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  identity: null
+  hardenedRuntime: false
+  minimumSystemVersion: '12.0'
+extraResources:
+  - from: build-resources/${arch}/python-runtime
+    to: python-runtime
+  - from: build-resources/${arch}/uv
+    to: uv
+  - from: build-resources/${arch}/ffmpeg
+    to: ffmpeg
+  - from: sidecar/requirements.txt
+    to: requirements.txt
+dmg:
+  title: Shorts AI ${version}
+  iconSize: 128
+  contents:
+    - x: 130
+      y: 220
+      type: file
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
