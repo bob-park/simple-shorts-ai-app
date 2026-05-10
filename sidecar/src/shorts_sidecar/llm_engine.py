@@ -13,8 +13,13 @@ import os
 import shutil
 from typing import Any, Callable
 
-from huggingface_hub import hf_hub_download
+import requests
+from huggingface_hub import hf_hub_url
 from llama_cpp import Llama, LlamaGrammar
+
+# Emit a progress event every ~1MB downloaded. Smaller = smoother UI but more
+# IPC noise; 1MB on a 2.5GB file ≈ 2500 events over a multi-minute download.
+_PROGRESS_EMIT_BYTES = 1024 * 1024
 
 
 HIGHLIGHTS_GBNF = r'''
@@ -66,37 +71,40 @@ class LlmEngine:
     ) -> None:
         """Download `filename` from HuggingFace `repo` into `model_path`.
 
-        Strategy: download into `<model_path>.partial-dir/` directory first
-        (so an interrupted download leaves only a `.partial-dir` artifact,
-        never a half-written final file the next launch might mistake for
-        valid). On success, atomically rename to the final path. On exception,
-        delete the partial artifact.
-
-        Note: `hf_hub_download` doesn't expose a byte-level progress callback
-        in the pinned version, so we emit just two events — (0, 0) at start
-        and (size, size) at end. Better-grained progress would require a raw
-        `requests` download with `iter_content`; out of scope for v1.
+        Strategy: stream the file directly via `requests.get(stream=True)` so
+        we get byte-level progress (huggingface_hub's `hf_hub_download` doesn't
+        expose a callback hook). Write to `<model_path>.partial-dir/<filename>`
+        and atomically rename on success; clean up the staging dir in `finally`
+        so a partial file is never mistaken for a valid model.
         """
+        url = hf_hub_url(repo_id=repo, filename=filename)
         partial_dir = model_path + ".partial-dir"
+        partial_file = os.path.join(partial_dir, filename)
         os.makedirs(partial_dir, exist_ok=True)
         try:
-            progress_callback(0, 0)
-            downloaded_path = hf_hub_download(
-                repo_id=repo,
-                filename=filename,
-                local_dir=partial_dir,
-                local_dir_use_symlinks=False,
-            )
-            size = os.path.getsize(downloaded_path)
-            progress_callback(size, size)
-            # Atomically rename out of the partial dir
-            os.replace(downloaded_path, model_path)
-        except Exception:
-            raise
+            with requests.get(url, stream=True, allow_redirects=True, timeout=30) as resp:
+                resp.raise_for_status()
+                total = int(resp.headers.get("content-length", 0))
+                progress_callback(0, total)
+                downloaded = 0
+                last_emitted = 0
+                with open(partial_file, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=_PROGRESS_EMIT_BYTES):
+                        if not chunk:
+                            continue
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if downloaded - last_emitted >= _PROGRESS_EMIT_BYTES:
+                            progress_callback(downloaded, total or downloaded)
+                            last_emitted = downloaded
+            # Final emit so the UI lands at exactly 100% even if the last
+            # chunk was smaller than _PROGRESS_EMIT_BYTES.
+            progress_callback(downloaded, total or downloaded)
+            os.replace(partial_file, model_path)
         finally:
-            # Best-effort recursive cleanup. huggingface_hub creates a `.cache/`
-            # subdirectory inside `local_dir` for staging metadata, so naive
-            # unlink+rmdir leaves a non-empty dir behind on success.
+            # Best-effort recursive cleanup. Removes the partial file on
+            # success (after rename, only the empty dir remains) and any
+            # half-written file on exception.
             shutil.rmtree(partial_dir, ignore_errors=True)
 
     # Pre-compile grammars at first use (lazy so tests can patch).

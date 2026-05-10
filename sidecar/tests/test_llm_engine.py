@@ -37,21 +37,45 @@ def test_model_status_ignores_partial_file(tmp_path: Path) -> None:
     assert status == {"exists": False, "sizeBytes": 0, "loaded": False}
 
 
+class _FakeStreamResponse:
+    """Mimics requests.Response in stream=True mode."""
+
+    def __init__(self, chunks: list[bytes], status: int = 200, content_length: int | None = None):
+        self._chunks = chunks
+        self.status_code = status
+        total = sum(len(c) for c in chunks) if content_length is None else content_length
+        self.headers = {"content-length": str(total)}
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def iter_content(self, chunk_size: int):
+        for c in self._chunks:
+            yield c
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
 def test_download_model_writes_then_atomically_renames(tmp_path, monkeypatch):
-    """Successful download path: progress fires, .partial gets renamed to final."""
+    """Successful streaming download: per-chunk progress fires, .partial gets renamed to final."""
     engine = LlmEngine()
     model_path = str(tmp_path / "model.gguf")
-    progress_calls = []
+    progress_calls: list[tuple[int, int]] = []
 
-    def fake_hf_download(*, repo_id, filename, local_dir, **kwargs):
-        # Simulate hf writing the file directly into local_dir/filename
-        out = Path(local_dir) / filename
-        out.write_bytes(b"FAKE_GGUF_CONTENTS" * 1000)
-        return str(out)
+    # 3MB total in 1MB chunks → engine should emit (0, total) start +
+    # one progress event per chunk that crosses the 1MB threshold + a final emit.
+    chunks = [b"x" * (1024 * 1024)] * 3
 
-    # Patch the hf_hub_download symbol the engine imports
+    def fake_get(url, stream, allow_redirects, timeout):
+        return _FakeStreamResponse(chunks)
+
     import shorts_sidecar.llm_engine as eng
-    monkeypatch.setattr(eng, "hf_hub_download", fake_hf_download)
+    monkeypatch.setattr(eng.requests, "get", fake_get)
 
     engine.download_model(
         model_path=model_path,
@@ -60,58 +84,58 @@ def test_download_model_writes_then_atomically_renames(tmp_path, monkeypatch):
         progress_callback=lambda processed, total: progress_calls.append((processed, total)),
     )
     assert os.path.exists(model_path)
-    # Final file matches the simulated content; .partial is gone
-    assert not os.path.exists(model_path + ".partial-dir")
-    # Two progress emissions: (0, 0) start + (size, size) end
-    assert len(progress_calls) == 2
-    assert progress_calls[0] == (0, 0)
-    assert progress_calls[1][0] == progress_calls[1][1]  # processed == total at completion
-    assert progress_calls[1][0] > 0
+    assert not os.path.exists(model_path + ".partial-dir"), "partial-dir must be removed on success"
+    assert os.path.getsize(model_path) == 3 * 1024 * 1024
+    # First emit is (0, total); last must reach (total, total).
+    assert progress_calls[0] == (0, 3 * 1024 * 1024)
+    assert progress_calls[-1] == (3 * 1024 * 1024, 3 * 1024 * 1024)
+    # At least 4 events (start + 3 chunks completing); more is fine.
+    assert len(progress_calls) >= 4
 
 
-def test_download_model_cleans_up_partial_with_nested_subdir_on_success(tmp_path, monkeypatch):
-    """huggingface_hub creates a `.cache/` subdir inside local_dir; cleanup
-    must remove it recursively so partial-dir doesn't leak after success."""
+def test_download_model_handles_unknown_content_length(tmp_path, monkeypatch):
+    """If the server doesn't send Content-Length, fall back to using the
+    downloaded count itself as 'total' (so the bar at least lands at 100%)."""
     engine = LlmEngine()
     model_path = str(tmp_path / "model.gguf")
-    partial_dir = model_path + ".partial-dir"
+    progress_calls: list[tuple[int, int]] = []
 
-    def fake_hf_with_cache_dir(*, repo_id, filename, local_dir, **kwargs):
-        out = Path(local_dir) / filename
-        out.write_bytes(b"FAKE_GGUF")
-        # Simulate hf's `.cache/` staging directory
-        cache_dir = Path(local_dir) / ".cache"
-        cache_dir.mkdir()
-        (cache_dir / "metadata.json").write_text("{}")
-        return str(out)
+    chunks = [b"x" * (1024 * 1024)] * 2
+
+    def fake_get(url, stream, allow_redirects, timeout):
+        # content_length=0 simulates a missing/unknown Content-Length header.
+        return _FakeStreamResponse(chunks, content_length=0)
 
     import shorts_sidecar.llm_engine as eng
-    monkeypatch.setattr(eng, "hf_hub_download", fake_hf_with_cache_dir)
+    monkeypatch.setattr(eng.requests, "get", fake_get)
 
     engine.download_model(
         model_path=model_path,
         repo="unsloth/gemma-3-4b-it-GGUF",
         filename="gemma-3-4b-it-Q4_K_M.gguf",
-        progress_callback=lambda *_: None,
+        progress_callback=lambda p, t: progress_calls.append((p, t)),
     )
     assert os.path.exists(model_path)
-    assert not os.path.exists(partial_dir), "partial-dir + nested .cache must be fully removed"
+    # Final emit should have processed == total (both = downloaded count).
+    assert progress_calls[-1] == (2 * 1024 * 1024, 2 * 1024 * 1024)
 
 
 def test_download_model_cleans_up_partial_on_exception(tmp_path, monkeypatch):
-    """If hf_hub_download raises, the .partial-dir contents must be deleted."""
+    """If the stream raises mid-download, the .partial-dir must be deleted."""
     engine = LlmEngine()
     model_path = str(tmp_path / "model.gguf")
     partial_dir = model_path + ".partial-dir"
 
-    def failing_hf(*, local_dir, filename, **kwargs):
-        # Simulate a partially-written file then a failure
-        out = Path(local_dir) / filename
-        out.write_bytes(b"PARTIAL")
-        raise RuntimeError("network error")
+    class FailingResponse(_FakeStreamResponse):
+        def iter_content(self, chunk_size: int):
+            yield b"x" * 1024
+            raise RuntimeError("network error")
+
+    def failing_get(url, stream, allow_redirects, timeout):
+        return FailingResponse([b"x" * 1024], content_length=1024 * 1024)
 
     import shorts_sidecar.llm_engine as eng
-    monkeypatch.setattr(eng, "hf_hub_download", failing_hf)
+    monkeypatch.setattr(eng.requests, "get", failing_get)
 
     with pytest.raises(RuntimeError, match="network error"):
         engine.download_model(
@@ -120,7 +144,7 @@ def test_download_model_cleans_up_partial_on_exception(tmp_path, monkeypatch):
             filename="gemma-3-4b-it-Q4_K_M.gguf",
             progress_callback=lambda *_: None,
         )
-    # Neither final nor partial should remain
+    # Neither final nor partial should remain.
     assert not os.path.exists(model_path)
     assert not os.path.exists(partial_dir)
 
