@@ -364,7 +364,7 @@ wheels = [
 
 [[package]]
 name = "llama-cpp-python"
-version = "0.3.2"
+version = "0.3.22"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "diskcache" },
@@ -372,7 +372,7 @@ dependencies = [
     { name = "numpy" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5f/0e/ff129005a33b955088fc7e4ecb57e5500b604fb97eca55ce8688dbe59680/llama_cpp_python-0.3.2.tar.gz", hash = "sha256:8fbf246a55a999f45015ed0d48f91b4ae04ae959827fac1cd6ac6ec65aed2e2f", size = 64964148, upload-time = "2024-11-16T00:57:27.543Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/57/ee/206c17c34ce1ba4cb5518c846e27b1f71f42a971fcfa008d24c871729e12/llama_cpp_python-0.3.22.tar.gz", hash = "sha256:93c54af95d917fe6d6d70039efe16ca9240634d11010f5aaf795261b9f43042f", size = 67970237, upload-time = "2026-05-02T22:40:56.385Z" }
 
 [[package]]
 name = "markupsafe"
@@ -766,7 +766,7 @@ dev = [
 requires-dist = [
     { name = "faster-whisper", specifier = ">=1.0.3" },
     { name = "huggingface-hub", specifier = "==0.26.5" },
-    { name = "llama-cpp-python", specifier = "==0.3.2" },
+    { name = "llama-cpp-python", specifier = ">=0.3.22" },
     { name = "mediapipe", specifier = ">=0.10.18" },
     { name = "opencv-python", specifier = ">=4.10" },
 ]
