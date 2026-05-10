@@ -7,11 +7,11 @@
  * Cached under build-resources/.cache/ — re-runs reuse cached archives
  * if SHA matches. Run via `yarn package` (which calls `prepackage`).
  */
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { mkdir, readFile, rename } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -19,12 +19,11 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const ROOT = resolve(__dirname, '..');
 const CACHE_DIR = join(ROOT, 'build-resources', '.cache');
 const OUT_DIR = join(ROOT, 'build-resources');
-const VERSIONS = JSON.parse(
-  await readFile(join(ROOT, 'scripts', 'runtime-versions.json'), 'utf8'),
-) as {
+const VERSIONS = JSON.parse(await readFile(join(ROOT, 'scripts', 'runtime-versions.json'), 'utf8')) as {
   python: { version: string; release: string; arm64: ArchEntry; x64: ArchEntry };
   uv: { version: string; arm64: ArchEntry; x64: ArchEntry };
   ffmpeg: { version: string; arm64: ArchEntry; x64: ArchEntry };
+  ytdlp: { version: string; arm64: ArchEntry; x64: ArchEntry };
 };
 
 interface ArchEntry {
@@ -97,6 +96,15 @@ async function unpackUv(archivePath: string, destFile: string, arch: Arch): Prom
   await spawn2('chmod', ['+x', destFile]);
 }
 
+async function installYtdlp(srcPath: string, destFile: string): Promise<void> {
+  // yt-dlp_macos is a single self-contained binary (universal2). No unpack —
+  // copy directly and chmod +x.
+  if (existsSync(destFile)) rmSync(destFile);
+  await mkdir(dirname(destFile), { recursive: true });
+  await spawn2('cp', [srcPath, destFile]);
+  await spawn2('chmod', ['+x', destFile]);
+}
+
 async function unpackFfmpeg(archivePath: string, destFile: string, arch: Arch): Promise<void> {
   if (existsSync(destFile)) rmSync(destFile);
   await mkdir(dirname(destFile), { recursive: true });
@@ -114,11 +122,7 @@ async function fetchArch(arch: Arch): Promise<void> {
   const archDir = join(OUT_DIR, arch);
 
   const pyMeta = VERSIONS.python[arch];
-  const pyArchive = await ensureCached(
-    pyMeta.url,
-    pyMeta.sha256,
-    `python-${VERSIONS.python.version}-${arch}.tar.gz`,
-  );
+  const pyArchive = await ensureCached(pyMeta.url, pyMeta.sha256, `python-${VERSIONS.python.version}-${arch}.tar.gz`);
   await unpackPython(pyArchive, join(archDir, 'python-runtime'));
 
   const uvMeta = VERSIONS.uv[arch];
@@ -126,12 +130,12 @@ async function fetchArch(arch: Arch): Promise<void> {
   await unpackUv(uvArchive, join(archDir, 'uv'), arch);
 
   const ffMeta = VERSIONS.ffmpeg[arch];
-  const ffArchive = await ensureCached(
-    ffMeta.url,
-    ffMeta.sha256,
-    `ffmpeg-${VERSIONS.ffmpeg.version}-${arch}.zip`,
-  );
+  const ffArchive = await ensureCached(ffMeta.url, ffMeta.sha256, `ffmpeg-${VERSIONS.ffmpeg.version}-${arch}.zip`);
   await unpackFfmpeg(ffArchive, join(archDir, 'ffmpeg'), arch);
+
+  const ytdlpMeta = VERSIONS.ytdlp[arch];
+  const ytdlpFile = await ensureCached(ytdlpMeta.url, ytdlpMeta.sha256, `yt-dlp-${VERSIONS.ytdlp.version}-${arch}`);
+  await installYtdlp(ytdlpFile, join(archDir, 'yt-dlp'));
 
   console.log(`  ✓ ${arch} ready at ${archDir}`);
 }

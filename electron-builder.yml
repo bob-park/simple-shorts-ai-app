@@ -29,6 +29,8 @@ extraResources:
     to: uv
   - from: build-resources/${arch}/ffmpeg
     to: ffmpeg
+  - from: build-resources/${arch}/yt-dlp
+    to: yt-dlp
   - from: sidecar/requirements.txt
     to: requirements.txt
   - from: sidecar/src

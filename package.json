@@ -9,7 +9,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "prepackage": "tsx scripts/fetch-runtime.ts",
-    "package": "yarn build && electron-builder build --mac",
+    "package": "yarn prepackage && yarn build && electron-builder build --mac",
     "preview": "electron-vite preview",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",

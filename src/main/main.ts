@@ -6,10 +6,11 @@ import { VideoMetaSchema, sanitizeFilename } from '@shared/youtube';
 import Database from 'better-sqlite3';
 import { BrowserWindow, app, dialog, ipcMain, session, shell } from 'electron';
 import Store from 'electron-store';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync, promises as fsPromises } from 'node:fs';
 import { basename, extname, join, resolve as resolvePath, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import youtubeDl from 'youtube-dl-exec';
 
 import { FfmpegRunner } from './infra/FfmpegRunner';
@@ -36,6 +37,13 @@ interface RuntimePaths {
   venvPath: string;
   requirementsPath: string;
   ffmpegBinary: string;
+  /**
+   * Standalone yt-dlp binary (PyInstaller single-file). Used instead of
+   * youtube-dl-exec's bundled zipapp because the zipapp shells out to system
+   * Python, and macOS's system Python (3.9 from CommandLineTools) is too old
+   * for current yt-dlp (requires 3.10+).
+   */
+  ytdlpBinary: string;
   sidecarCwd: string;
   /**
    * In packaged mode, sidecar is launched as the venv's python directly;
@@ -61,6 +69,7 @@ function resolveRuntimePaths(): RuntimePaths {
       venvPath,
       requirementsPath: join(r, 'requirements.txt'),
       ffmpegBinary: join(r, 'ffmpeg'),
+      ytdlpBinary: join(r, 'yt-dlp'),
       sidecarCwd: r,
       sidecarSpawn: {
         command: join(venvPath, 'bin', 'python'),
@@ -77,6 +86,9 @@ function resolveRuntimePaths(): RuntimePaths {
     venvPath: join(repoRoot, 'sidecar', '.venv'),
     requirementsPath: join(repoRoot, 'sidecar', 'requirements.txt'),
     ffmpegBinary: 'ffmpeg',
+    // Dev mode: fall back to youtube-dl-exec's bundled zipapp via the
+    // shell's PATH-resolved python3 (mise/asdf/system 3.10+).
+    ytdlpBinary: '',
     sidecarCwd: join(repoRoot, 'sidecar'),
     sidecarSpawn: { command: 'uv', args: ['run', 'python', '-m', 'shorts_sidecar'] },
     sidecarEnv: {},
@@ -301,19 +313,45 @@ void app.whenReady().then(() => {
     downloads: app.getPath('downloads'),
     documents: app.getPath('documents'),
   });
-  // The downloader spawns yt-dlp directly (separate from youtube-dl-exec's
-  // default export); without an explicit path it would fall back to PATH
-  // lookup and fail with ENOENT in dev. Point it at the bundled binary.
-  // In packaged mode the binary lives under app.asar.unpacked/ — spawn() can't
-  // execute files inside the asar archive, so rewrite the path.
-  const ytdlpRawPath = (youtubeDl as unknown as { constants: { YOUTUBE_DL_PATH: string } }).constants.YOUTUBE_DL_PATH;
+  const runtimePathsBoot = resolveRuntimePaths();
+  // yt-dlp resolution:
+  //
+  // Packaged mode — use the standalone PyInstaller binary bundled at
+  // Resources/yt-dlp (see scripts/fetch-runtime.ts). It has its own embedded
+  // Python, so it doesn't depend on system Python. (youtube-dl-exec's bundled
+  // yt-dlp is a Python zipapp that shells out to system python3, which on
+  // macOS is 3.9 from CommandLineTools — too old for current yt-dlp.)
+  //
+  // Dev mode — fall back to youtube-dl-exec's bundled zipapp (the dev
+  // shell PATH usually has python 3.10+ via mise/asdf). Rewrite the asar
+  // path just in case the dev mode happens to be launched packaged.
+  //
+  // We invoke via execFile() rather than youtube-dl-exec's default function
+  // because that pipes through tinyspawn, which splits the binary path on
+  // whitespace (tinyspawn/src/index.js:45) — broken for paths like
+  // "/Applications/Shorts AI.app/...".
+  const ytdlpFromYdlExec = (youtubeDl as unknown as { constants: { YOUTUBE_DL_PATH: string } }).constants
+    .YOUTUBE_DL_PATH;
   const ytdlpBinaryPath = app.isPackaged
-    ? ytdlpRawPath.replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`)
-    : ytdlpRawPath;
+    ? runtimePathsBoot.ytdlpBinary
+    : ytdlpFromYdlExec.replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`);
+  console.log('[main] yt-dlp binary path:', ytdlpBinaryPath);
+  const execFileP = promisify(execFile);
+  const ytdlpFn = async (url: string, flags: Record<string, unknown>) => {
+    const args: string[] = [url];
+    if (flags.dumpSingleJson) args.push('--dump-single-json');
+    if (flags.skipDownload) args.push('--skip-download');
+    if (flags.noWarnings) args.push('--no-warnings');
+    const { stdout } = await execFileP(ytdlpBinaryPath, args, {
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return JSON.parse(stdout);
+  };
   youtubeService = new YouTubeService({
-    youtubeDl: youtubeDl as never,
+    youtubeDl: ytdlpFn as never,
     spawn: spawn as never,
     binaryPath: ytdlpBinaryPath,
+    ffmpegLocation: runtimePathsBoot.ffmpegBinary,
   });
 
   // IPC handlers

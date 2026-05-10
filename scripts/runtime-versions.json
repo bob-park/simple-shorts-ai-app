@@ -32,5 +32,16 @@
       "url": "https://www.osxexperts.net/ffmpeg71intel.zip",
       "sha256": "356b39a61de48eadb57a3f84f53d3261ab9847c788d88537511a475a7137a1e6"
     }
+  },
+  "ytdlp": {
+    "version": "2026.03.17",
+    "arm64": {
+      "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.03.17/yt-dlp_macos",
+      "sha256": "e80c47b3ce712acee51d5e3d4eace2d181b44d38f1942c3a32e3c7ff53cd9ed5"
+    },
+    "x64": {
+      "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.03.17/yt-dlp_macos",
+      "sha256": "e80c47b3ce712acee51d5e3d4eace2d181b44d38f1942c3a32e3c7ff53cd9ed5"
+    }
   }
 }
