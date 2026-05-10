@@ -1,4 +1,4 @@
-import { ApiModelSection } from '@renderer/components/settings/ApiModelSection';
+import { LlmSection } from '@renderer/components/settings/LlmSection';
 import { OutputSection } from '@renderer/components/settings/OutputSection';
 import { PathsSection } from '@renderer/components/settings/PathsSection';
 import { SubtitlesSection } from '@renderer/components/settings/SubtitlesSection';
@@ -29,13 +29,13 @@ export function SettingsPage() {
       <header>
         <h1 className="text-heading-md text-ink font-semibold">설정</h1>
         <p className="mt-md text-body-md text-slate">
-          API 키, 경로, 모델, 자막 등을 한 번 설정해 두면 새 작업마다 기본값으로 쓰입니다.
+          경로, 모델, 자막 등을 한 번 설정해 두면 새 작업마다 기본값으로 쓰입니다.
         </p>
       </header>
 
-      <ApiModelSection llm={settings.llm} onLlmChange={(llm) => void update({ llm })} />
       <PathsSection paths={settings.paths} onChange={(paths) => void update({ paths })} />
       <WhisperSection whisper={settings.whisper} onChange={(whisper) => void update({ whisper })} />
+      <LlmSection />
       <SubtitlesSection subtitles={settings.subtitles} onChange={(subtitles) => void update({ subtitles })} />
       <OutputSection shorts={settings.shorts} onChange={(shorts) => void update({ shorts })} />
     </section>

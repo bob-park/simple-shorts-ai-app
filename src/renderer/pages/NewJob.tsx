@@ -9,14 +9,12 @@ import { useHighlights } from '@renderer/hooks/useHighlights';
 import { useRender } from '@renderer/hooks/useRender';
 import { useTranscribe } from '@renderer/hooks/useTranscribe';
 import { useVideoPreview } from '@renderer/hooks/useVideoPreview';
-import { useNavigate } from 'react-router-dom';
 
 export function NewJobPage() {
   const preview = useVideoPreview();
   const download = useDownload();
   const transcribe = useTranscribe();
   const highlights = useHighlights();
-  const navigate = useNavigate();
   const renderShort = useRender();
 
   const downloadInFlight = download.status === 'starting' || download.status === 'downloading';
@@ -106,15 +104,19 @@ export function NewJobPage() {
                 }}
               />
               {highlights.state.status === 'probing' ? <HighlightCard status="probing" /> : null}
-              {highlights.state.status === 'missing-key' ? (
-                <HighlightCard status="missing-key" onOpenSettings={() => navigate('/settings')} />
-              ) : null}
               {highlights.state.status === 'idle' ? (
                 <HighlightCard
                   status="idle"
                   onStart={() => {
                     if (transcribe.state.status === 'done') void highlights.start(transcribe.state.audioPath);
                   }}
+                />
+              ) : null}
+              {highlights.state.status === 'downloading-model' ? (
+                <HighlightCard
+                  status="downloading-model"
+                  processedBytes={highlights.state.processedBytes}
+                  totalBytes={highlights.state.totalBytes}
                 />
               ) : null}
               {highlights.state.status === 'extracting' ? (

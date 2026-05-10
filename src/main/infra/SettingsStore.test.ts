@@ -39,15 +39,12 @@ describe('SettingsStore', () => {
     expect(s.paths.downloads).toContain('Downloads');
     expect(s.paths.workspace).toContain('Documents');
     expect(s.paths.outputs).toContain('Downloads');
-    expect(s.llm.provider).toBe('openrouter');
     expect(s.shorts.defaultCount).toBe(3);
   });
 
   it('merges a patch into persisted state and returns the merged result', () => {
     const merged = store.update({ shorts: { defaultCount: 5, minSec: 30, maxSec: 90 } });
     expect(merged.shorts.defaultCount).toBe(5);
-    // Other sections preserved
-    expect(merged.llm.provider).toBe('openrouter');
     // Round-trip: a fresh read returns the same merged state
     expect(store.get().shorts.defaultCount).toBe(5);
   });

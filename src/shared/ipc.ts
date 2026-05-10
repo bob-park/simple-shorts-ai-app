@@ -14,10 +14,6 @@ export interface AppApi {
   updateSettings(patch: Partial<Settings>): Promise<Settings>;
   resetSettings(): Promise<Settings>;
 
-  hasApiKey(): Promise<boolean>;
-  setApiKey(key: string): Promise<void>;
-  clearApiKey(): Promise<void>;
-
   pickFolder(opts: { title?: string; defaultPath?: string }): Promise<string | null>;
 
   fetchVideoPreview(url: string): Promise<VideoMeta>;
@@ -36,9 +32,10 @@ export interface AppApi {
 
   /**
    * Extract highlight clips from a previously-transcribed video. Reads the
-   * sibling `<audioPath>.transcript.json`, sends words to OpenRouter, writes
-   * `<audioPath>.highlights.json`. Throws `MissingApiKeyError` (message
-   * starts with `OpenRouter API key is not set`) if no key is configured.
+   * sibling `<audioPath>.transcript.json`, sends segments to the local Gemma
+   * model via the Python sidecar, writes `<audioPath>.highlights.json`. On
+   * first call, automatically downloads the model GGUF (~2.5GB) — progress
+   * events come through `onExtractProgress` with `phase: 'download'`.
    */
   extractHighlights(audioPath: string): Promise<{ highlightsPath: string; highlightSet: HighlightSet }>;
   /** Cancel the active highlight extraction (no-op if none). */
@@ -68,6 +65,13 @@ export interface AppApi {
   historyGetDetail(jobId: string): Promise<JobDetail | null>;
   /** Permanently delete a job + its shorts + thumbnails. */
   historyDelete(jobId: string): Promise<void>;
+
+  /** Status of the local Gemma model file on disk. */
+  llmModelStatus(): Promise<{ exists: boolean; sizeBytes: number; loaded: boolean }>;
+  /** Manually trigger a (re-)download of the local model. Streams progress via `onLlmDownloadProgress`. */
+  llmDownloadModel(): Promise<void>;
+  /** Subscribe to download progress for the manual `llmDownloadModel` flow. */
+  onLlmDownloadProgress(callback: (p: { processed: number; total: number }) => void): () => void;
 
   revealInFolder(absolutePath: string): Promise<void>;
   /** Open a file with the OS default app (e.g., transcript.json → text editor). */
