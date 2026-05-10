@@ -306,8 +306,7 @@ void app.whenReady().then(() => {
   // lookup and fail with ENOENT in dev. Point it at the bundled binary.
   // In packaged mode the binary lives under app.asar.unpacked/ — spawn() can't
   // execute files inside the asar archive, so rewrite the path.
-  const ytdlpRawPath = (youtubeDl as unknown as { constants: { YOUTUBE_DL_PATH: string } }).constants
-    .YOUTUBE_DL_PATH;
+  const ytdlpRawPath = (youtubeDl as unknown as { constants: { YOUTUBE_DL_PATH: string } }).constants.YOUTUBE_DL_PATH;
   const ytdlpBinaryPath = app.isPackaged
     ? ytdlpRawPath.replace(`${sep}app.asar${sep}`, `${sep}app.asar.unpacked${sep}`)
     : ytdlpRawPath;
