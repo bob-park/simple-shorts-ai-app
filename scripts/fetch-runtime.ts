@@ -5,7 +5,8 @@
  * build-resources/<target>/<tool>/ for electron-builder to pick up.
  *
  * Cached under build-resources/.cache/ — re-runs reuse cached archives
- * if SHA matches. Run via `yarn package` (which calls `prepackage`).
+ * if SHA matches. Invoked via `yarn fetch-runtime:mac` or
+ * `yarn fetch-runtime:win`.
  */
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';

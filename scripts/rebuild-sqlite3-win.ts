@@ -7,6 +7,7 @@
  * if the CLI exposed a --platform flag.  Invoked by `yarn rebuild:better-sqlite3:win`.
  */
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,10 +21,16 @@ async function main(): Promise<void> {
     await readFile(resolve(ROOT, 'node_modules/electron/package.json'), 'utf8'),
   ) as { version: string };
   const electronVersion = electronPkg.version;
+  if (!electronVersion) {
+    throw new Error('Could not read electron version from node_modules/electron/package.json');
+  }
 
   // prebuild-install ships with better-sqlite3 itself; the top-level copy is
   // also fine — they are the same package resolved by Yarn.
   const prebuildBin = resolve(ROOT, 'node_modules/prebuild-install/bin.js');
+  if (!existsSync(prebuildBin)) {
+    throw new Error(`prebuild-install not found at ${prebuildBin} — run \`yarn install\``);
+  }
   const modulePath = resolve(ROOT, 'node_modules/better-sqlite3');
 
   const args = [
