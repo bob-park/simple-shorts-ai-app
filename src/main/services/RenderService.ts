@@ -99,12 +99,9 @@ export class RenderService {
         ? baseArgs
         : appendSubtitleFilter(baseArgs, assInfo.assPath);
       // For the user-facing RenderClipResult.subtitles field, only report a
-      // populated subtitles record when at least one word cue was emitted —
-      // a title-only ASS still has cueCount=0 and shouldn't appear as
-      // "subtitles were rendered" from the user's perspective.
-      // Only report populated subtitles when cues were emitted AND the filter
-      // was actually applied (i.e. libass is available). When subtitlesUnavailable
-      // is set the .ass file exists on disk but no subtitle filter was used.
+      // populated subtitles record when at least one word cue was emitted AND
+      // the filter was actually applied. A title-only ASS (cueCount=0) or a
+      // run where subtitlesUnavailable is set both produce null here.
       const reportedSubtitles =
         !this.subtitlesUnavailable && assInfo.cueCount > 0
           ? { cues: assInfo.cueCount, assPath: assInfo.assPath }
