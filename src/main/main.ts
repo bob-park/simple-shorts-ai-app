@@ -80,12 +80,20 @@ function resolveRuntimePaths(): RuntimePaths {
   }
   // Dev mode — same behavior as before
   const repoRoot = resolvePath(__dirname, '../../');
+  // Prefer the bundled ffmpeg (built with libass) over PATH-resolved system
+  // ffmpeg when build-resources is populated. Homebrew's default ffmpeg in
+  // recent versions omits --enable-libass, which silently strips the
+  // `subtitles=` filter and breaks title + caption rendering. Falls back to
+  // PATH 'ffmpeg' when build-resources/<arch>/ffmpeg is absent (i.e., user
+  // hasn't run `yarn prepackage` yet).
+  const bundledFfmpeg = join(repoRoot, 'build-resources', process.arch, 'ffmpeg');
+  const ffmpegBinary = existsSync(bundledFfmpeg) ? bundledFfmpeg : 'ffmpeg';
   return {
     uvBinary: 'uv',
     pythonRuntime: 'python3.11',
     venvPath: join(repoRoot, 'sidecar', '.venv'),
     requirementsPath: join(repoRoot, 'sidecar', 'requirements.txt'),
-    ffmpegBinary: 'ffmpeg',
+    ffmpegBinary,
     // Dev mode: fall back to youtube-dl-exec's bundled zipapp via the
     // shell's PATH-resolved python3 (mise/asdf/system 3.10+).
     ytdlpBinary: '',
