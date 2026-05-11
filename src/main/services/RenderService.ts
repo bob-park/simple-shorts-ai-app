@@ -1,5 +1,6 @@
 import type { Highlight, HighlightSegment } from '@shared/highlight';
 import type { RenderClipResult, RenderProgress, RenderResult } from '@shared/render';
+import { SHORT_LAYOUT, VIDEO_CROP_DEN, VIDEO_CROP_NUM } from '@shared/shortLayout';
 import type { TrackResult } from '@shared/track';
 import type { Word } from '@shared/transcript';
 import { promises as fsPromises } from 'node:fs';
@@ -91,11 +92,23 @@ export class RenderService {
         trackingInfo !== null
           ? buildTrackedArgs(opts.sourcePath, h.segments, outputPath, trackingInfo.cmdPath)
           : buildCenterArgs(opts.sourcePath, h.segments, outputPath);
-      const subtitlesInfo =
-        opts.subtitleOptions && opts.transcriptWords && !this.subtitlesUnavailable
-          ? await this.maybeWriteSubtitles(opts, h, clipIndex, durationSec)
+      // ASS file is always written — it carries the title-bar text even when
+      // no transcript words / no subtitleOptions are provided.
+      const assInfo = await this.writeAssFile(opts, h, clipIndex, durationSec);
+      const args = this.subtitlesUnavailable
+        ? baseArgs
+        : appendSubtitleFilter(baseArgs, assInfo.assPath);
+      // For the user-facing RenderClipResult.subtitles field, only report a
+      // populated subtitles record when at least one word cue was emitted —
+      // a title-only ASS still has cueCount=0 and shouldn't appear as
+      // "subtitles were rendered" from the user's perspective.
+      // Only report populated subtitles when cues were emitted AND the filter
+      // was actually applied (i.e. libass is available). When subtitlesUnavailable
+      // is set the .ass file exists on disk but no subtitle filter was used.
+      const reportedSubtitles =
+        !this.subtitlesUnavailable && assInfo.cueCount > 0
+          ? { cues: assInfo.cueCount, assPath: assInfo.assPath }
           : null;
-      const args = subtitlesInfo ? appendSubtitleFilter(baseArgs, subtitlesInfo.assPath) : baseArgs;
 
       const handle = this.runner.run({ args, durationSec });
       this.activeHandle = handle;
@@ -114,14 +127,14 @@ export class RenderService {
             outputPath,
             undefined,
             trackingInfo ? { frames: trackingInfo.frameCount, trackPath: trackingInfo.trackPath } : null,
-            subtitlesInfo ? { cues: subtitlesInfo.cueCount, assPath: subtitlesInfo.assPath } : null,
+            reportedSubtitles,
           ),
         );
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
         if (this.canceled || /canceled/i.test(message)) {
           results.push(this.buildClipResult(clipIndex, h, 'canceled', undefined, 'Render canceled'));
-        } else if (subtitlesInfo && /No such filter: ['"]subtitles['"]/.test(message)) {
+        } else if (!this.subtitlesUnavailable && /No such filter: ['"]subtitles['"]/.test(message)) {
           this.subtitlesUnavailable = true;
           this.activeHandle = null;
           const retryHandle = this.runner.run({ args: baseArgs, durationSec });
@@ -202,20 +215,33 @@ export class RenderService {
     return { cmdPath, trackPath, frameCount: allFrames.length };
   }
 
-  private async maybeWriteSubtitles(
+  /** Default subtitle style used when the caller doesn't pass `subtitleOptions`.
+   *  Only the Title style row consumes these fields in the title-only path —
+   *  values are harmless placeholders for Default since no word cues exist. */
+  private static readonly DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
+    fontFamily: 'Pretendard',
+    fontSize: 64,
+    fillColor: '#FFFFFF',
+    outlineColor: '#000000',
+    position: 'bottom',
+  };
+
+  private async writeAssFile(
     opts: RenderOptions,
     h: Highlight,
     clipIndex: number,
     montageDuration: number,
-  ): Promise<{ assPath: string; cueCount: number } | null> {
-    if (!opts.subtitleOptions || !opts.transcriptWords) return null;
-    const rebased = rebaseTranscriptWords(h.segments, opts.transcriptWords);
-    if (rebased.length === 0) return null;
-    const assContent = buildAssFile(rebased, 0, montageDuration, opts.subtitleOptions);
-    if (assContent === '') return null;
+  ): Promise<{ assPath: string; cueCount: number }> {
+    const style = opts.subtitleOptions ?? RenderService.DEFAULT_SUBTITLE_STYLE;
+    const words = opts.subtitleOptions && opts.transcriptWords
+      ? rebaseTranscriptWords(h.segments, opts.transcriptWords)
+      : [];
+    const assContent = buildAssFile(words, 0, montageDuration, style, h.title);
     const assPath = join(opts.outputDir, `short_${clipIndex}.ass`);
     await this.fs.writeFile(assPath, assContent, 'utf8');
-    const cueCount = (assContent.match(/^Dialogue:/gm) ?? []).length;
+    // Count Default-style Dialogue lines only — the Title Dialogue line is
+    // always present and not user-visible "subtitle cue" data.
+    const cueCount = (assContent.match(/^Dialogue:.*,Default,/gm) ?? []).length;
     return { assPath, cueCount };
   }
 
@@ -263,8 +289,13 @@ function buildSelectExpr(segments: HighlightSegment[]): string {
   return segments.map((s) => `between(t,${s.start_sec},${s.end_sec})`).join('+');
 }
 
+const CROP_CENTER_EXPR = `crop=ih*${VIDEO_CROP_NUM}/${VIDEO_CROP_DEN}:ih`;
+const CROP_TRACKED_RHS = `crop@c=ih*${VIDEO_CROP_NUM}/${VIDEO_CROP_DEN}:ih:0:0`;
+const SCALE_EXPR = `scale=${SHORT_LAYOUT.outputWidth}:${SHORT_LAYOUT.videoHeight}`;
+const PAD_EXPR = `pad=${SHORT_LAYOUT.outputWidth}:${SHORT_LAYOUT.outputHeight}:0:${SHORT_LAYOUT.topBarHeight}:black`;
+
 function buildVfChain(segments: HighlightSegment[], cropClause: string): string {
-  return `select='${buildSelectExpr(segments)}',setpts=N/FRAME_RATE/TB,${cropClause},scale=1080:1920`;
+  return `select='${buildSelectExpr(segments)}',setpts=N/FRAME_RATE/TB,${cropClause},${SCALE_EXPR},${PAD_EXPR}`;
 }
 
 function buildAfChain(segments: HighlightSegment[]): string {
@@ -277,7 +308,7 @@ function buildCenterArgs(sourcePath: string, segments: HighlightSegment[], outpu
     '-i',
     sourcePath,
     '-vf',
-    buildVfChain(segments, 'crop=ih*9/16:ih'),
+    buildVfChain(segments, CROP_CENTER_EXPR),
     '-af',
     buildAfChain(segments),
     ...COMMON_ENCODE_ARGS,
@@ -291,7 +322,7 @@ function buildTrackedArgs(
   outputPath: string,
   cmdPath: string,
 ): string[] {
-  const cropClause = `sendcmd=f=${cmdPath},crop@c=ih*9/16:ih:0:0`;
+  const cropClause = `sendcmd=f=${cmdPath},${CROP_TRACKED_RHS}`;
   return [
     '-y',
     '-i',

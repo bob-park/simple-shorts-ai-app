@@ -43,12 +43,14 @@ function fakeRunHandle() {
 describe('RenderService', () => {
   let run: ReturnType<typeof vi.fn>;
   let runner: { run: typeof run };
+  let writeFile: ReturnType<typeof vi.fn>;
   let service: RenderService;
 
   beforeEach(() => {
     run = vi.fn();
     runner = { run };
-    service = new RenderService(runner as never);
+    writeFile = vi.fn(async (_path: string, _content: string, _enc?: string) => undefined);
+    service = new RenderService(runner as never, { fs: { writeFile } as never });
   });
 
   it('renders one ffmpeg child per highlight, in order', async () => {
@@ -62,7 +64,8 @@ describe('RenderService', () => {
       highlights: [fakeHighlight(1, 0, 30), fakeHighlight(2, 60, 90)],
     });
 
-    // First clip starts immediately
+    // First clip starts after writeAssFile resolves (one microtask)
+    await new Promise((r) => setTimeout(r, 0));
     expect(run).toHaveBeenCalledTimes(1);
     h1._resolve();
     await new Promise((r) => setTimeout(r, 0));
@@ -100,13 +103,17 @@ describe('RenderService', () => {
     expect(args[args.indexOf('-i') + 1]).toBe('/tmp/in.mp4');
     expect(args).toContain('-vf');
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,5,35)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+      "select='between(t,5,35)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
     expect(args).toContain('-af');
     expect(args[args.indexOf('-af') + 1]).toBe("aselect='between(t,5,35)',asetpts=N/SR/TB");
     expect(args).toContain('libx264');
     expect(args).toContain('aac');
     expect(args[args.length - 1]).toBe('/tmp/out/short_1.mp4');
+    // ASS file always written (title-only when no transcript words / options provided)
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(writeFile.mock.calls[0]![0]).toBe('/tmp/out/short_1.ass');
+    expect(writeFile.mock.calls[0]![1] as string).toContain('Style: Title,');
   });
 
   it('emits per-clip progress with clipIndex, clipTotal, and fraction', async () => {
@@ -123,6 +130,8 @@ describe('RenderService', () => {
       highlights: [fakeHighlight(1, 0, 10), fakeHighlight(2, 20, 30)],
     });
 
+    // Yield for writeAssFile to resolve before emitting progress
+    await new Promise((r) => setTimeout(r, 0));
     h1._emit(0.5);
     h1._emit(1.0);
     h1._resolve();
@@ -233,18 +242,19 @@ describe('RenderService with tracker', () => {
     h._resolve();
     const result = await promise;
 
-    // Two files written: short_1.cmd and short_1.track.json
-    expect(writeFile).toHaveBeenCalledTimes(2);
+    // Three files written: short_1.cmd, short_1.track.json, and short_1.ass (always written)
+    expect(writeFile).toHaveBeenCalledTimes(3);
     const writePaths = writeFile.mock.calls.map((c: unknown[]) => c[0]);
     expect(writePaths).toContain('/tmp/out/short_1.cmd');
     expect(writePaths).toContain('/tmp/out/short_1.track.json');
+    expect(writePaths).toContain('/tmp/out/short_1.ass');
 
     // ffmpeg args use sendcmd + named crop
     const args: string[] = run.mock.calls[0]![0].args;
     const vfIndex = args.indexOf('-vf');
     expect(vfIndex).toBeGreaterThan(-1);
     expect(args[vfIndex + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,sendcmd=f=/tmp/out/short_1.cmd,crop@c=ih*9/16:ih:0:0,scale=1080:1920",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,sendcmd=f=/tmp/out/short_1.cmd,crop@c=ih*3/4:ih:0:0,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
 
     // RenderClipResult.tracking populated
@@ -268,12 +278,16 @@ describe('RenderService with tracker', () => {
     h._resolve();
     const result = await promise;
 
-    // No track files written
-    expect(writeFile).not.toHaveBeenCalled();
+    // No track files written — but .ass is always written (title-only)
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    const writePaths = writeFile.mock.calls.map((c: unknown[]) => c[0]);
+    expect(writePaths).not.toContain('/tmp/out/short_1.cmd');
+    expect(writePaths).not.toContain('/tmp/out/short_1.track.json');
+    expect(writePaths).toContain('/tmp/out/short_1.ass');
     // Args use the static center crop with select filter
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
     expect(result.results[0]!.tracking).toBeNull();
     expect(result.results[0]!.status).toBe('done');
@@ -299,11 +313,13 @@ describe('RenderService with tracker', () => {
     h._resolve();
     const result = await promise;
 
-    // Same fallback path as empty frames
-    expect(writeFile).not.toHaveBeenCalled();
+    // Same fallback path as empty frames — .ass always written (title-only), no track files
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    const writePaths = writeFile.mock.calls.map((c: unknown[]) => c[0]);
+    expect(writePaths).toContain('/tmp/out/short_1.ass');
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
     expect(result.results[0]!.tracking).toBeNull();
     expect(result.results[0]!.status).toBe('done');
@@ -331,10 +347,14 @@ describe('RenderService with tracker', () => {
     const result = await promise;
 
     // No track files written — buildSendcmd's throw is caught + degraded to fallback.
-    expect(writeFile).not.toHaveBeenCalled();
+    // .ass is still always written (title-only).
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    const writePaths = writeFile.mock.calls.map((c: unknown[]) => c[0]);
+    expect(writePaths).not.toContain('/tmp/out/short_1.cmd');
+    expect(writePaths).toContain('/tmp/out/short_1.ass');
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
     expect(result.results[0]!.tracking).toBeNull();
     expect(result.results[0]!.status).toBe('done');
@@ -393,14 +413,14 @@ describe('RenderService with subtitles', () => {
     const args: string[] = run.mock.calls[0]![0].args;
     const vfIndex = args.indexOf('-vf');
     expect(args[vfIndex + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
 
     // RenderClipResult.subtitles populated
     expect(result.results[0]!.subtitles).toEqual({ cues: 1, assPath: '/tmp/out/short_1.ass' });
   });
 
-  it('skips ass writing + filter when subtitleOptions is undefined', async () => {
+  it('writes title-only ass + subtitles filter when subtitleOptions is undefined', async () => {
     const writeFile = vi.fn(async (_path: string, _content: string, _enc?: string) => undefined);
     const fs = { writeFile };
     const service = new RenderService(runner as never, { fs: fs as never });
@@ -417,15 +437,22 @@ describe('RenderService with subtitles', () => {
     h._resolve();
     const result = await promise;
 
-    expect(writeFile).not.toHaveBeenCalled();
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(writeFile.mock.calls[0]![0]).toBe('/tmp/out/short_1.ass');
+    const ass = writeFile.mock.calls[0]![1] as string;
+    expect(ass).toContain('Style: Title,');
+    // No Default-style Dialogue (no subtitleOptions → no word cues are emitted by RenderService)
+    expect(ass).not.toContain(',Default,');
+
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
+    // RenderClipResult.subtitles → null because no word cues were emitted.
     expect(result.results[0]!.subtitles).toBeNull();
   });
 
-  it('skips ass writing when no transcript words fall inside the clip window', async () => {
+  it('writes title-only ass when no transcript words fall inside the clip window', async () => {
     const writeFile = vi.fn(async (_path: string, _content: string, _enc?: string) => undefined);
     const fs = { writeFile };
     const service = new RenderService(runner as never, { fs: fs as never });
@@ -442,10 +469,15 @@ describe('RenderService with subtitles', () => {
     h._resolve();
     const result = await promise;
 
-    expect(writeFile).not.toHaveBeenCalled();
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(writeFile.mock.calls[0]![0]).toBe('/tmp/out/short_1.ass');
+    const ass = writeFile.mock.calls[0]![1] as string;
+    expect(ass).toContain('Style: Title,');
+    expect(ass).not.toContain(',Default,'); // no word cues fell in window
+
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,100,130)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+      "select='between(t,100,130)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
     expect(result.results[0]!.subtitles).toBeNull();
   });
@@ -507,23 +539,23 @@ describe('RenderService with subtitles', () => {
     // Clip 1 retry args have NO subtitles filter
     const retryArgs: string[] = run.mock.calls[1]![0].args;
     expect(retryArgs[retryArgs.indexOf('-vf') + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black",
     );
     // Clip 2 args also have NO subtitles filter (service flag set after first failure)
     const clip2Args: string[] = run.mock.calls[2]![0].args;
     expect(clip2Args[clip2Args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,60,90)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+      "select='between(t,60,90)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black",
     );
     // Both clips end up done with subtitles: null
     expect(result.results[0]!.status).toBe('done');
     expect(result.results[0]!.subtitles).toBeNull();
     expect(result.results[1]!.status).toBe('done');
     expect(result.results[1]!.subtitles).toBeNull();
-    // .ass file was written for clip 1 (before failure detected) — that's OK, harmless leftover.
-    // Clip 2 should NOT have written one.
+    // Both clips' ASS files are written (we don't gate writing on the libass
+    // flag — only the filter application). The harmless leftovers are fine.
     const writePaths = writeFile.mock.calls.map((c) => c[0]);
     expect(writePaths).toContain('/tmp/out/short_1.ass');
-    expect(writePaths).not.toContain('/tmp/out/short_2.ass');
+    expect(writePaths).toContain('/tmp/out/short_2.ass');
   });
 
   it('multi-segment highlight builds select filter with multiple between() ranges', async () => {
@@ -549,7 +581,7 @@ describe('RenderService with subtitles', () => {
 
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,5,8)+between(t,12,15)+between(t,30,33)',setpts=N/FRAME_RATE/TB,crop=ih*9/16:ih,scale=1080:1920",
+      "select='between(t,5,8)+between(t,12,15)+between(t,30,33)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
     expect(args[args.indexOf('-af') + 1]).toBe(
       "aselect='between(t,5,8)+between(t,12,15)+between(t,30,33)',asetpts=N/SR/TB",
@@ -677,7 +709,8 @@ describe('RenderService with subtitles', () => {
   });
 
   it('multi-segment durationSec passed to runner is the sum of segment durations', async () => {
-    const service = new RenderService(runner as never);
+    const writeFile = vi.fn(async (_p: string, _c: string, _e?: string) => undefined);
+    const service = new RenderService(runner as never, { fs: { writeFile } as never });
     const h = fakeRunHandle();
     run.mockReturnValue(h);
 
