@@ -37,10 +37,12 @@ export const RenderClipResultSchema = z.object({
     })
     .nullish(),
   /**
-   * If subtitles were enabled and at least one cue landed in the clip window:
-   * the cue count and the persisted .ass file path. Absent when subtitles
-   * were disabled in settings OR no transcript words fell inside the clip
-   * range (silent clip).
+   * Populated only when at least one word-level cue was rendered into the
+   * clip. Null when no transcript words fell in the clip window, when the
+   * user disabled subtitles in Settings, or when the libass filter was
+   * unavailable on the rendering ffmpeg. The .ass file is still written
+   * in all cases — it carries the title-bar text — but this user-facing
+   * field describes only the word-cue subset.
    */
   subtitles: z
     .object({

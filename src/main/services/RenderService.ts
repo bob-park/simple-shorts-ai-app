@@ -8,7 +8,7 @@ import { join } from 'node:path';
 
 import { rebaseTrackingFrames, rebaseTranscriptWords } from './MontageHelpers';
 import { buildSendcmd } from './SendcmdGenerator';
-import { type SubtitleStyle, buildAssFile } from './SubtitleGenerator';
+import { DEFAULT_SUBTITLE_STYLE, type SubtitleStyle, buildAssFile } from './SubtitleGenerator';
 
 interface RunnerLike {
   run(opts: { args: readonly string[]; durationSec: number }): {
@@ -37,7 +37,12 @@ export interface RenderOptions {
   highlights: Highlight[];
   /** Whisper word-level timings, used to generate subtitle .ass files. */
   transcriptWords?: Word[];
-  /** When provided AND words fall in the clip window, subtitles are burned in. */
+  /**
+   * When provided AND transcript words fall in the clip window, word-level
+   * subtitle cues are emitted in the burned-in .ass file. The .ass file
+   * itself is always written (it carries the title-bar text); this option
+   * only controls whether word-level cues are added alongside the title.
+   */
   subtitleOptions?: SubtitleStyle;
 }
 
@@ -103,9 +108,7 @@ export class RenderService {
       // the filter was actually applied. A title-only ASS (cueCount=0) or a
       // run where subtitlesUnavailable is set both produce null here.
       const reportedSubtitles =
-        !this.subtitlesUnavailable && assInfo.cueCount > 0
-          ? { cues: assInfo.cueCount, assPath: assInfo.assPath }
-          : null;
+        !this.subtitlesUnavailable && assInfo.cues > 0 ? assInfo : null;
 
       const handle = this.runner.run({ args, durationSec });
       this.activeHandle = handle;
@@ -212,24 +215,13 @@ export class RenderService {
     return { cmdPath, trackPath, frameCount: allFrames.length };
   }
 
-  /** Default subtitle style used when the caller doesn't pass `subtitleOptions`.
-   *  Only the Title style row consumes these fields in the title-only path —
-   *  values are harmless placeholders for Default since no word cues exist. */
-  private static readonly DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
-    fontFamily: 'Pretendard',
-    fontSize: 64,
-    fillColor: '#FFFFFF',
-    outlineColor: '#000000',
-    position: 'bottom',
-  };
-
   private async writeAssFile(
     opts: RenderOptions,
     h: Highlight,
     clipIndex: number,
     montageDuration: number,
-  ): Promise<{ assPath: string; cueCount: number }> {
-    const style = opts.subtitleOptions ?? RenderService.DEFAULT_SUBTITLE_STYLE;
+  ): Promise<{ assPath: string; cues: number }> {
+    const style = opts.subtitleOptions ?? DEFAULT_SUBTITLE_STYLE;
     const words = opts.subtitleOptions && opts.transcriptWords
       ? rebaseTranscriptWords(h.segments, opts.transcriptWords)
       : [];
@@ -238,8 +230,8 @@ export class RenderService {
     await this.fs.writeFile(assPath, assContent, 'utf8');
     // Count Default-style Dialogue lines only — the Title Dialogue line is
     // always present and not user-visible "subtitle cue" data.
-    const cueCount = (assContent.match(/^Dialogue:.*,Default,/gm) ?? []).length;
-    return { assPath, cueCount };
+    const cues = (assContent.match(/^Dialogue:.*,Default,/gm) ?? []).length;
+    return { assPath, cues };
   }
 
   private buildClipResult(

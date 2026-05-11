@@ -26,6 +26,20 @@ const TITLE_MARGIN_V = 140;
 const TITLE_FONT_SIZE = 64;
 
 /**
+ * Fallback style used when the caller of `buildAssFile` doesn't supply
+ * subtitle options (i.e., word-level subtitles disabled in Settings).
+ * Only the Title row consumes `fontFamily` from this style; word cues
+ * are skipped, so the Default-row fields are inert placeholders here.
+ */
+export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
+  fontFamily: 'Pretendard',
+  fontSize: 64,
+  fillColor: '#FFFFFF',
+  outlineColor: '#000000',
+  position: 'bottom',
+};
+
+/**
  * Build a complete .ass file content string (libass-compatible). Always
  * non-empty: emits a `Title` style + a full-clip-duration Dialogue line
  * carrying `titleText` (rendered in the 240px top bar), and a `Default`
