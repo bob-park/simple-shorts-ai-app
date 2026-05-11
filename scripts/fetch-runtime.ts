@@ -115,15 +115,22 @@ async function unpackPython(archivePath: string, destDir: string): Promise<void>
 }
 
 async function unpackUv(archivePath: string, destFile: string, target: Target): Promise<void> {
-  // mac-arm64 only for now; Task 5 will branch on file extension to handle the windows zip.
   if (existsSync(destFile)) rmSync(destFile);
   await mkdir(dirname(destFile), { recursive: true });
   const extractDir = join(CACHE_DIR, `uv-extract-${target}`);
   if (existsSync(extractDir)) rmSync(extractDir, { recursive: true, force: true });
   mkdirSync(extractDir, { recursive: true });
-  await spawn2('tar', ['-xzf', archivePath, '-C', extractDir]);
-  const archDirName = 'uv-aarch64-apple-darwin';  // mac-arm64 only; widened in Task 5
-  await spawn2('cp', [join(extractDir, archDirName, 'uv'), destFile]);
+
+  if (archivePath.endsWith('.zip')) {
+    // Windows uv zip — payload is just `uv.exe` at the root.
+    await spawn2('unzip', ['-q', '-o', archivePath, '-d', extractDir]);
+    await spawn2('cp', [join(extractDir, 'uv.exe'), destFile]);
+  } else {
+    // macOS uv tar.gz — payload is `uv-<triple>/uv`.
+    await spawn2('tar', ['-xzf', archivePath, '-C', extractDir]);
+    const archDirName = target === 'mac-arm64' ? 'uv-aarch64-apple-darwin' : 'uv-x86_64-apple-darwin';
+    await spawn2('cp', [join(extractDir, archDirName, 'uv'), destFile]);
+  }
   await spawn2('chmod', ['+x', destFile]);
 }
 
@@ -137,22 +144,39 @@ async function installYtdlp(srcPath: string, destFile: string): Promise<void> {
 }
 
 async function unpackFfmpeg(archivePath: string, destFile: string, target: Target): Promise<void> {
-  // Same: mac-only for now; Task 5 widens. unzip the osxexperts.net archive
-  // and copy the single 'ffmpeg' binary at root.
   if (existsSync(destFile)) rmSync(destFile);
   await mkdir(dirname(destFile), { recursive: true });
   const extractDir = join(CACHE_DIR, `ffmpeg-extract-${target}`);
   if (existsSync(extractDir)) rmSync(extractDir, { recursive: true, force: true });
   mkdirSync(extractDir, { recursive: true });
   await spawn2('unzip', ['-q', '-o', archivePath, '-d', extractDir]);
-  // osxexperts.net zips contain a single `ffmpeg` binary at the root
-  await spawn2('cp', [join(extractDir, 'ffmpeg'), destFile]);
+
+  // Probe two known layouts in order:
+  //   1. osxexperts.net (mac):  <extractDir>/ffmpeg            — single binary at root
+  //   2. BtbN (win):            <extractDir>/<inner>/bin/ffmpeg.exe
+  const macFlat = join(extractDir, 'ffmpeg');
+  if (existsSync(macFlat)) {
+    await spawn2('cp', [macFlat, destFile]);
+  } else {
+    // BtbN nested: <extractDir>/ffmpeg-*-win64-gpl-*/bin/ffmpeg.exe
+    const { readdirSync } = await import('node:fs');
+    const subdirs = readdirSync(extractDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+    if (subdirs.length !== 1) {
+      throw new Error(`expected exactly one nested directory in ffmpeg zip, found: ${subdirs.join(', ')}`);
+    }
+    const winExe = join(extractDir, subdirs[0]!, 'bin', 'ffmpeg.exe');
+    if (!existsSync(winExe)) throw new Error(`ffmpeg.exe not found at ${winExe}`);
+    await spawn2('cp', [winExe, destFile]);
+  }
   await spawn2('chmod', ['+x', destFile]);
 }
 
 async function fetchTarget(target: Target): Promise<void> {
   console.log(`\n=== ${target} ===`);
   const archDir = join(OUT_DIR, target);
+  const ext = target === 'win-x64' ? '.exe' : '';
 
   const pyMeta = VERSIONS.python.targets[target];
   if (!pyMeta) throw new Error(`No python entry for target ${target}`);
@@ -161,18 +185,22 @@ async function fetchTarget(target: Target): Promise<void> {
 
   const uvMeta = VERSIONS.uv.targets[target];
   if (!uvMeta) throw new Error(`No uv entry for target ${target}`);
-  const uvArchive = await ensureCached(uvMeta.url, uvMeta.sha256, `uv-${VERSIONS.uv.version}-${target}.tar.gz`);
-  await unpackUv(uvArchive, join(archDir, 'uv'), target);
+  const uvArchive = await ensureCached(
+    uvMeta.url,
+    uvMeta.sha256,
+    `uv-${VERSIONS.uv.version}-${target}${target === 'win-x64' ? '.zip' : '.tar.gz'}`,
+  );
+  await unpackUv(uvArchive, join(archDir, `uv${ext}`), target);
 
   const ffMeta = VERSIONS.ffmpeg.targets[target];
   if (!ffMeta) throw new Error(`No ffmpeg entry for target ${target}`);
   const ffArchive = await ensureCached(ffMeta.url, ffMeta.sha256, `ffmpeg-${VERSIONS.ffmpeg.version}-${target}.zip`);
-  await unpackFfmpeg(ffArchive, join(archDir, 'ffmpeg'), target);
+  await unpackFfmpeg(ffArchive, join(archDir, `ffmpeg${ext}`), target);
 
   const ytdlpMeta = VERSIONS.ytdlp.targets[target];
   if (!ytdlpMeta) throw new Error(`No yt-dlp entry for target ${target}`);
-  const ytdlpFile = await ensureCached(ytdlpMeta.url, ytdlpMeta.sha256, `yt-dlp-${VERSIONS.ytdlp.version}-${target}`);
-  await installYtdlp(ytdlpFile, join(archDir, 'yt-dlp'));
+  const ytdlpFile = await ensureCached(ytdlpMeta.url, ytdlpMeta.sha256, `yt-dlp-${VERSIONS.ytdlp.version}-${target}${ext}`);
+  await installYtdlp(ytdlpFile, join(archDir, `yt-dlp${ext}`));
 
   console.log(`  ✓ ${target} ready at ${archDir}`);
 }
