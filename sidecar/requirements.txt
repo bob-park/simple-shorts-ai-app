@@ -10,3 +10,16 @@ mediapipe>=0.10.18
 opencv-python>=4.10
 llama-cpp-python>=0.3.22
 huggingface-hub==0.26.5
+
+# CTranslate2 4.x's Windows wheel is CUDA-enabled. Selecting
+# device='cuda' (or 'auto' which then probes for CUDA) makes it eagerly
+# load cublas64_12.dll and cudnn_*.dll from the OS DLL search path. Ship
+# NVIDIA's own Python wheels of those libraries on Windows so the DLLs
+# are present in the venv; ctranslate2 ≥4.0 automatically calls
+# os.add_dll_directory() on nvidia.cublas and nvidia.cudnn at import,
+# so no extra wiring is needed in our sidecar. cudnn pinned to 9.* per
+# faster-whisper's documented install. Skipped on mac/Linux via the
+# sys_platform marker (no Windows-only CUDA story there).
+# See https://github.com/SYSTRAN/faster-whisper#installation
+nvidia-cublas-cu12; sys_platform == 'win32'
+nvidia-cudnn-cu12==9.*; sys_platform == 'win32'
