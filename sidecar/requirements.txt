@@ -1,9 +1,8 @@
-# llama-cpp-python doesn't publish Windows wheels to PyPI for recent
-# versions — the maintainer hosts them at the URL below. Without this,
-# uv falls back to a source build, which needs MSVC + CMake + nmake
-# on the install target (impractical for an end-user installer).
-# https://github.com/abetlen/llama-cpp-python#installation
---extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+# Note: the llama-cpp-python --extra-index-url is NOT declared here because it
+# differs per target platform (CPU build on mac, CUDA build on win), and uv
+# does not let `--extra-index-url` lines in requirements.txt be platform-
+# scoped. The index URL is passed in from SetupWizardService at first-launch
+# setup (see src/main/main.ts where `extraIndexUrls` is wired).
 
 faster-whisper>=1.0.3
 mediapipe>=0.10.18
@@ -11,15 +10,14 @@ opencv-python>=4.10
 llama-cpp-python>=0.3.22
 huggingface-hub==0.26.5
 
-# CTranslate2 4.x's Windows wheel is CUDA-enabled. Selecting
-# device='cuda' (or 'auto' which then probes for CUDA) makes it eagerly
-# load cublas64_12.dll and cudnn_*.dll from the OS DLL search path. Ship
-# NVIDIA's own Python wheels of those libraries on Windows so the DLLs
-# are present in the venv; ctranslate2 ≥4.0 automatically calls
-# os.add_dll_directory() on nvidia.cublas and nvidia.cudnn at import,
-# so no extra wiring is needed in our sidecar. cudnn pinned to 9.* per
-# faster-whisper's documented install. Skipped on mac/Linux via the
-# sys_platform marker (no Windows-only CUDA story there).
-# See https://github.com/SYSTRAN/faster-whisper#installation
+# CUDA runtime libraries — required by CTranslate2 (for Whisper GPU) and by
+# llama-cpp-python's CUDA build (for LLM GPU). NVIDIA publishes them as Python
+# wheels that drop DLLs into <venv>/Lib/site-packages/nvidia/<lib>/bin/. Our
+# sidecar's __main__.py calls os.add_dll_directory() on those paths before any
+# CUDA-linked import so the OS loader finds cublas64_12.dll, cudnn_*.dll, and
+# cudart64_12.dll. cudnn pinned to 9.* per faster-whisper's install docs;
+# cuda-runtime pulls in cudart64_12.dll which the cu12x llama-cpp-python wheel
+# also needs. All sys_platform == 'win32' — mac/Linux installs stay slim.
 nvidia-cublas-cu12; sys_platform == 'win32'
 nvidia-cudnn-cu12==9.*; sys_platform == 'win32'
+nvidia-cuda-runtime-cu12; sys_platform == 'win32'

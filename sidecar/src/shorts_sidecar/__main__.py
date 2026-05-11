@@ -2,12 +2,39 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
+from pathlib import Path
 from queue import Queue
 
-from .rpc import encode_message, parse_line
-from .server import Server
+
+def _add_nvidia_dll_directories() -> None:
+    """Make NVIDIA's CUDA DLLs (cublas64_12.dll, cudnn_*.dll, cudart64_12.dll)
+    discoverable by the OS DLL loader on Windows.
+
+    The `nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, and `nvidia-cuda-runtime-cu12`
+    Python wheels drop their DLLs at `<venv>/Lib/site-packages/nvidia/<lib>/bin/`,
+    which is NOT in the default LoadLibrary search path. CTranslate2 ≥ 4.4 and
+    llama-cpp-python ≥ 0.3 both *try* to auto-add these directories at import
+    time, but older transitive versions don't, so we do it explicitly here
+    BEFORE the first ctranslate2 / llama-cpp import (which happens inside
+    `.server` → faster_whisper / llama_cpp). The Path.is_dir guard makes this
+    a no-op when the packages aren't installed (CPU-only configurations).
+    """
+    if sys.platform != "win32":
+        return
+    site_packages = Path(sys.prefix) / "Lib" / "site-packages" / "nvidia"
+    for subdir in ("cublas", "cudnn", "cuda_runtime"):
+        bin_dir = site_packages / subdir / "bin"
+        if bin_dir.is_dir():
+            os.add_dll_directory(str(bin_dir))
+
+
+_add_nvidia_dll_directories()
+
+from .rpc import encode_message, parse_line  # noqa: E402
+from .server import Server  # noqa: E402
 
 
 def _stdin_reader(inbound: Queue) -> None:

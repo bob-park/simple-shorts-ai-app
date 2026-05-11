@@ -13,11 +13,19 @@ describe('ffmpegFilterValue', () => {
     );
   });
 
-  it('doubles backslashes so ffmpeg sees the raw path on Windows', () => {
-    // Input: C:\Users\hwpark\short_1.cmd  (literal backslashes from the OS path layer)
-    // Output: 'C:\\Users\\hwpark\\short_1.cmd' (ffmpeg level-1 escape inside single quotes)
+  it('converts backslashes to forward slashes for Windows paths', () => {
+    // Windows file APIs accept either separator. Converting `\` → `/` avoids
+    // ffmpeg's backslash-escape interpretation, which varies between builds
+    // (BtbN's n7.1.4 win64-gpl wheel rejects `\\` inside single quotes even
+    // though the docs say it should work).
     expect(ffmpegFilterValue('C:\\Users\\hwpark\\short_1.cmd')).toBe(
-      "'C:\\\\Users\\\\hwpark\\\\short_1.cmd'",
+      "'C:/Users/hwpark/short_1.cmd'",
+    );
+  });
+
+  it('preserves Korean characters and spaces inside the value', () => {
+    expect(ffmpegFilterValue('C:\\Users\\hwpark\\요플레뚜껑 핥을까\\short_1.ass')).toBe(
+      "'C:/Users/hwpark/요플레뚜껑 핥을까/short_1.ass'",
     );
   });
 
