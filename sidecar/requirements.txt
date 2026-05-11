@@ -1,3 +1,10 @@
+# llama-cpp-python doesn't publish Windows wheels to PyPI for recent
+# versions — the maintainer hosts them at the URL below. Without this,
+# uv falls back to a source build, which needs MSVC + CMake + nmake
+# on the install target (impractical for an end-user installer).
+# https://github.com/abetlen/llama-cpp-python#installation
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+
 faster-whisper>=1.0.3
 mediapipe>=0.10.18
 opencv-python>=4.10
