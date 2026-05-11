@@ -8,15 +8,23 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "prepackage": "tsx scripts/fetch-runtime.ts",
-    "package": "yarn prepackage && yarn build && electron-builder build --mac",
+
+    "fetch-runtime:mac": "tsx scripts/fetch-runtime.ts --target=mac-arm64",
+    "fetch-runtime:win": "tsx scripts/fetch-runtime.ts --target=win-x64",
+
+    "package:mac": "yarn fetch-runtime:mac && yarn build && yarn rebuild:electron && electron-builder build --mac",
+    "package:win": "yarn fetch-runtime:win && yarn build && yarn rebuild:better-sqlite3:win && electron-builder build --win",
+    "package": "yarn package:mac",
+
     "preview": "electron-vite preview",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron ./node_modules/.bin/vitest run",
     "test:watch": "ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron ./node_modules/.bin/vitest",
+
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
+    "rebuild:better-sqlite3:win": "tsx scripts/rebuild-sqlite3-win.ts",
     "postinstall": "electron-rebuild -f -w better-sqlite3"
   },
   "engines": {
