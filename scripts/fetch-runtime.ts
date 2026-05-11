@@ -13,7 +13,7 @@ import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync } fr
 import { mkdir, readFile, rename } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -31,6 +31,30 @@ interface Tool {
   version: string;
   release?: string;            // python-only; ignored elsewhere
   targets: Partial<Record<Target, ArchEntry>>;
+}
+
+const KNOWN_TARGETS: readonly Target[] = ['mac-arm64', 'win-x64'];
+
+export function parseTargetsArg(
+  argv: string[],
+  platform: NodeJS.Platform,
+  arch: string,
+): Target[] {
+  const flag = argv.find((a) => a.startsWith('--target='));
+  if (flag) {
+    const raw = flag.slice('--target='.length).split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+    for (const t of raw) {
+      if (!KNOWN_TARGETS.includes(t as Target)) {
+        throw new Error(`unknown target: ${t} (known: ${KNOWN_TARGETS.join(', ')})`);
+      }
+    }
+    return raw as Target[];
+  }
+  // No --target: auto-detect from host. Only darwin-arm64 currently has
+  // a 1:1 mapping. Anything else (win-x64 build, linux dev) must pass
+  // --target explicitly.
+  if (platform === 'darwin' && arch === 'arm64') return ['mac-arm64'];
+  throw new Error(`No --target= given and host platform/arch (${platform}/${arch}) is not auto-mappable`);
 }
 
 const VERSIONS = JSON.parse(await readFile(join(ROOT, 'scripts', 'runtime-versions.json'), 'utf8')) as {
@@ -155,11 +179,16 @@ async function fetchTarget(target: Target): Promise<void> {
 
 async function main(): Promise<void> {
   await mkdir(CACHE_DIR, { recursive: true });
-  await fetchTarget('mac-arm64');  // Task 3 generalises this via --target
+  const targets = parseTargetsArg(process.argv, process.platform, process.arch);
+  for (const t of targets) await fetchTarget(t);
   console.log('\nAll runtime artifacts ready under build-resources/');
 }
 
-void main().catch((e) => {
-  console.error('fetch-runtime failed:', e);
-  process.exit(1);
-});
+// Only run main() when this file is executed directly (CLI), not when
+// imported by tests. Mirrors Python's `if __name__ == '__main__'`.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  void main().catch((e) => {
+    console.error('fetch-runtime failed:', e);
+    process.exit(1);
+  });
+}
