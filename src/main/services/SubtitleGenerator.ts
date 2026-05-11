@@ -21,6 +21,8 @@ const MARGIN_V = 120;
 /** Title style baseline distance from frame top, in 1920-canvas px.
  *  140 places the top-aligned title near the vertical center of the 240px top bar. */
 const TITLE_MARGIN_V = 140;
+/** Title text size, in libass-canvas px. Matched to Default fontsize so
+ *  the bar visually carries the same weight as the word subtitle line. */
 const TITLE_FONT_SIZE = 64;
 
 /**
@@ -70,6 +72,10 @@ export function buildAssFile(
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BorderStyle, Outline, Alignment, MarginV, Encoding',
     `Style: Default,${style.fontFamily},${style.fontSize},${fillAss},${outlineAss},1,${OUTLINE_WIDTH},${alignment},${MARGIN_V},1`,
+    // Title row colors are pinned (white-on-black). The user-configurable
+    // fillColor / outlineColor only apply to word subtitles, which sit on
+    // the (also-black) bottom bar. Outline=0 since text is already on solid
+    // black; Alignment=8 means top-center (libass numpad layout).
     `Style: Title,${style.fontFamily},${TITLE_FONT_SIZE},&H00FFFFFF,&H00000000,1,0,8,${TITLE_MARGIN_V},1`,
     '',
     '[Events]',
@@ -83,7 +89,7 @@ export function buildAssFile(
     .map((c) => `Dialogue: 0,${formatAssTime(c.startSec)},${formatAssTime(c.endSec)},Default,${c.text}`)
     .join('\n');
 
-  const body = subtitleDialogues.length > 0 ? `${titleDialogue}\n${subtitleDialogues}` : titleDialogue;
+  const body = cues.length > 0 ? `${titleDialogue}\n${subtitleDialogues}` : titleDialogue;
   return `${header}\n${body}\n`;
 }
 
