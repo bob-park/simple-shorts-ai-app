@@ -168,8 +168,12 @@ def test_chat_passes_json_schema_response_format(tmp_path, monkeypatch):
             captured.append(kwargs)
             return {"choices": [{"message": {"content": '{"highlights":[]}'}}], "usage": {}}
 
-    import shorts_sidecar.llm_engine as eng
-    monkeypatch.setattr(eng, "Llama", FakeLlama)
+    import llama_cpp
+    # llm_engine imports `Llama` lazily inside _ensure_loaded to avoid a CUDA
+    # import crash on machines without an NVIDIA driver. Patch the symbol on
+    # the upstream module so the lazy `from llama_cpp import Llama` picks up
+    # the fake.
+    monkeypatch.setattr(llama_cpp, "Llama", FakeLlama)
 
     engine.chat(model_path=fake_model_path, system="s", user="u", schema_id="highlights",
                 temperature=0.7, max_tokens=128)
@@ -188,8 +192,12 @@ def test_chat_rejects_unknown_schema_id(tmp_path, monkeypatch):
         def create_chat_completion(self, **kwargs):
             return {"choices": [{"message": {"content": "{}"}}], "usage": {}}
 
-    import shorts_sidecar.llm_engine as eng
-    monkeypatch.setattr(eng, "Llama", FakeLlama)
+    import llama_cpp
+    # llm_engine imports `Llama` lazily inside _ensure_loaded to avoid a CUDA
+    # import crash on machines without an NVIDIA driver. Patch the symbol on
+    # the upstream module so the lazy `from llama_cpp import Llama` picks up
+    # the fake.
+    monkeypatch.setattr(llama_cpp, "Llama", FakeLlama)
 
     with pytest.raises(ValueError, match="unknown schema_id"):
         engine.chat(model_path=fake_model_path, system="s", user="u", schema_id="bogus",
@@ -213,8 +221,12 @@ def test_chat_loads_model_once_for_repeated_calls(tmp_path, monkeypatch):
                 "usage": {"prompt_tokens": 1, "completion_tokens": 1},
             }
 
-    import shorts_sidecar.llm_engine as eng
-    monkeypatch.setattr(eng, "Llama", FakeLlama)
+    import llama_cpp
+    # llm_engine imports `Llama` lazily inside _ensure_loaded to avoid a CUDA
+    # import crash on machines without an NVIDIA driver. Patch the symbol on
+    # the upstream module so the lazy `from llama_cpp import Llama` picks up
+    # the fake.
+    monkeypatch.setattr(llama_cpp, "Llama", FakeLlama)
 
     r1 = engine.chat(model_path=fake_model_path, system="s", user="u", schema_id="highlights",
                     temperature=0.7, max_tokens=128)
@@ -240,8 +252,12 @@ def test_chat_reloads_model_when_path_changes(tmp_path, monkeypatch):
         def create_chat_completion(self, **kwargs):
             return {"choices": [{"message": {"content": '{"highlights":[]}'}}], "usage": {}}
 
-    import shorts_sidecar.llm_engine as eng
-    monkeypatch.setattr(eng, "Llama", FakeLlama)
+    import llama_cpp
+    # llm_engine imports `Llama` lazily inside _ensure_loaded to avoid a CUDA
+    # import crash on machines without an NVIDIA driver. Patch the symbol on
+    # the upstream module so the lazy `from llama_cpp import Llama` picks up
+    # the fake.
+    monkeypatch.setattr(llama_cpp, "Llama", FakeLlama)
 
     engine.chat(model_path=p1, system="s", user="u", schema_id="highlights", temperature=0.7, max_tokens=128)
     engine.chat(model_path=p2, system="s", user="u", schema_id="highlights", temperature=0.7, max_tokens=128)
