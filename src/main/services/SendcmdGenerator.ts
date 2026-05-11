@@ -1,3 +1,4 @@
+import { VIDEO_CROP_DEN, VIDEO_CROP_NUM } from '@shared/shortLayout';
 import type { TrackResult } from '@shared/track';
 
 const EMIT_FPS = 30;
@@ -23,11 +24,11 @@ const EMIT_FPS = 30;
  */
 export function buildSendcmd(track: TrackResult, clipStartSec: number): string {
   if (track.frames.length === 0) return '';
-  const cropW = Math.floor((track.sourceHeight * 9) / 16);
+  const cropW = Math.floor((track.sourceHeight * VIDEO_CROP_NUM) / VIDEO_CROP_DEN);
   if (cropW > track.sourceWidth) {
     throw new Error(
-      `SendcmdGenerator: source is already 9:16 or taller (sourceWidth=${track.sourceWidth}, ` +
-        `sourceHeight=${track.sourceHeight}, cropW=${cropW})`,
+      `SendcmdGenerator: source is already ${VIDEO_CROP_NUM}:${VIDEO_CROP_DEN} or taller ` +
+        `(sourceWidth=${track.sourceWidth}, sourceHeight=${track.sourceHeight}, cropW=${cropW})`,
     );
   }
   const maxX = track.sourceWidth - cropW;

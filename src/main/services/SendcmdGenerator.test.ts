@@ -32,11 +32,11 @@ describe('buildSendcmd', () => {
     expect(lines).toHaveLength(16);
     // First line: alpha = 0 → exact frame 0.
     expect(lines[0]!.t).toBeCloseTo(0, 5);
-    // crop_w = floor(1080 * 9/16) = 607. round(960 - 303.5) = 657.
-    expect(lines[0]!.x).toBe(657);
-    // Trailing line: exact frame 1. round(1200 - 303.5) = 897.
+    // crop_w = floor(1080 * 3/4) = 810. round(960 - 405) = 555.
+    expect(lines[0]!.x).toBe(555);
+    // Trailing line: exact frame 1. round(1200 - 405) = 795.
     expect(lines[15]!.t).toBeCloseTo(0.5, 5);
-    expect(lines[15]!.x).toBe(897);
+    expect(lines[15]!.x).toBe(795);
   });
 
   it('linearly interpolates cx between keyframes (monotonic + midpoint check)', () => {
@@ -52,8 +52,8 @@ describe('buildSendcmd', () => {
     for (let i = 1; i < lines.length; i++) {
       expect(lines[i]!.x).toBeGreaterThanOrEqual(lines[i - 1]!.x);
     }
-    // Midpoint (alpha = 7/15) cx ≈ 960 + 240 * 7/15 = 1072 → round(1072 - 303.5) = 769.
-    expect(lines[7]!.x).toBe(769);
+    // Midpoint (alpha = 7/15) cx ≈ 960 + 240 * 7/15 = 1072 → round(1072 - 405) = 667.
+    expect(lines[7]!.x).toBe(667);
   });
 
   it('rebases time to clip-relative across multiple keyframe pairs', () => {
@@ -77,7 +77,7 @@ describe('buildSendcmd', () => {
     const out = buildSendcmd(track([{ t: 0, cx: 960, cy: 540 }]), 0);
     const lines = parseLines(out);
     expect(lines).toHaveLength(1);
-    expect(lines[0]!.x).toBe(657);
+    expect(lines[0]!.x).toBe(555);
   });
 
   it('returns an empty string for empty frames (caller falls back to center)', () => {
@@ -86,8 +86,8 @@ describe('buildSendcmd', () => {
   });
 
   it('clamps interpolated steps at sourceWidth - cropW when cx is past the right edge', () => {
-    // crop_w = 607, max x = 1920 - 607 = 1313.
-    // Interpolating cx 1900 → 2000 should clamp every step at 1313.
+    // crop_w = 810, max x = 1920 - 810 = 1110.
+    // Interpolating cx 1900 → 2000 should clamp every step at 1110.
     const out = buildSendcmd(
       track([
         { t: 0, cx: 1900, cy: 540 },
@@ -98,7 +98,7 @@ describe('buildSendcmd', () => {
     const lines = parseLines(out);
     expect(lines).toHaveLength(16);
     for (const line of lines) {
-      expect(line.x).toBe(1313);
+      expect(line.x).toBe(1110);
     }
   });
 
@@ -123,7 +123,7 @@ describe('buildSendcmd', () => {
       sourceHeight: 2000,
       frames: [{ t: 0, cx: 500, cy: 1000 }],
     };
-    expect(() => buildSendcmd(portrait, 0)).toThrow(/already 9:16 or taller/i);
+    expect(() => buildSendcmd(portrait, 0)).toThrow(/already 3:4 or taller/i);
   });
 
   it('skips a pair with duplicate timestamps (dt = 0) and still emits correctly', () => {
