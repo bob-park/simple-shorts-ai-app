@@ -16,6 +16,13 @@ export interface RuntimePaths {
   ytdlpBinary: string;
   sidecarCwd: string;
   /**
+   * Path to the venv's python interpreter — `<venv>/bin/python` on mac and
+   * Linux, `<venv>\Scripts\python.exe` on Windows. Passed to uv as the
+   * `--python` value when installing requirements into the venv, and used by
+   * `SetupWizardService` to check whether the venv has been created.
+   */
+  venvPythonBinary: string;
+  /**
    * Packaged: sidecar venv's python directly. Dev: `uv run python -m
    * shorts_sidecar` which auto-resolves the venv.
    */
@@ -47,6 +54,7 @@ export function resolveRuntimePaths(ctx: ResolveRuntimePathsContext): RuntimePat
   if (ctx.isPackaged) {
     const r = ctx.resourcesPath;
     const venvPath = join(ctx.userDataPath, 'sidecar-venv');
+    const venvPythonBinary = join(venvPath, venvBin, `python${exe}`);
     return {
       uvBinary: join(r, `uv${exe}`),
       pythonRuntime: join(r, 'python-runtime', ...pythonInRuntime),
@@ -55,10 +63,8 @@ export function resolveRuntimePaths(ctx: ResolveRuntimePathsContext): RuntimePat
       ffmpegBinary: join(r, `ffmpeg${exe}`),
       ytdlpBinary: join(r, `yt-dlp${exe}`),
       sidecarCwd: r,
-      sidecarSpawn: {
-        command: join(venvPath, venvBin, `python${exe}`),
-        args: ['-m', 'shorts_sidecar'],
-      },
+      venvPythonBinary,
+      sidecarSpawn: { command: venvPythonBinary, args: ['-m', 'shorts_sidecar'] },
       sidecarEnv: { PYTHONPATH: join(r, 'sidecar-src') },
     };
   }
@@ -67,14 +73,16 @@ export function resolveRuntimePaths(ctx: ResolveRuntimePathsContext): RuntimePat
   const targetDir = `${isWin ? 'win' : 'mac'}-${ctx.arch}`;
   const bundledFfmpeg = join(ctx.repoRoot, 'build-resources', targetDir, `ffmpeg${exe}`);
   const ffmpegBinary = ctx.fileExists(bundledFfmpeg) ? bundledFfmpeg : `ffmpeg${exe}`;
+  const venvPath = join(ctx.repoRoot, 'sidecar', '.venv');
   return {
     uvBinary: 'uv',
     pythonRuntime: 'python3.11',
-    venvPath: join(ctx.repoRoot, 'sidecar', '.venv'),
+    venvPath,
     requirementsPath: join(ctx.repoRoot, 'sidecar', 'requirements.txt'),
     ffmpegBinary,
     ytdlpBinary: '',
     sidecarCwd: join(ctx.repoRoot, 'sidecar'),
+    venvPythonBinary: join(venvPath, venvBin, `python${exe}`),
     sidecarSpawn: { command: 'uv', args: ['run', 'python', '-m', 'shorts_sidecar'] },
     sidecarEnv: {},
   };

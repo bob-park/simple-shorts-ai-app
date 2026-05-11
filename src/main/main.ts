@@ -290,6 +290,7 @@ function getSetupWizard(): SetupWizardService {
     uvBinary: paths.uvBinary,
     pythonRuntime: paths.pythonRuntime,
     venvPath: paths.venvPath,
+    venvPythonBinary: paths.venvPythonBinary,
     requirementsPath: paths.requirementsPath,
     spawn,
     fs: { access: fsPromises.access },

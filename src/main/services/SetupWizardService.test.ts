@@ -23,11 +23,20 @@ const opts = {
   uvBinary: '/r/uv',
   pythonRuntime: '/r/python-runtime/bin/python3.11',
   venvPath: '/data/sidecar-venv',
+  venvPythonBinary: '/data/sidecar-venv/bin/python',
   requirementsPath: '/r/requirements.txt',
 };
 
+const WIN_OPTS = {
+  uvBinary: 'C:\\Program Files\\Shorts AI\\resources\\uv.exe',
+  pythonRuntime: 'C:\\Program Files\\Shorts AI\\resources\\python-runtime\\python.exe',
+  venvPath: 'C:\\Users\\u\\AppData\\Roaming\\Shorts AI\\sidecar-venv',
+  venvPythonBinary: 'C:\\Users\\u\\AppData\\Roaming\\Shorts AI\\sidecar-venv\\Scripts\\python.exe',
+  requirementsPath: 'C:\\Program Files\\Shorts AI\\resources\\requirements.txt',
+};
+
 describe('SetupWizardService.status', () => {
-  it("returns 'ready' when bin/python exists", async () => {
+  it("returns 'ready' when the venv python exists (probes opts.venvPythonBinary, not a hardcoded path)", async () => {
     const access = vi.fn(async (_p: string) => undefined);
     const svc = new SetupWizardService({
       ...opts,
@@ -38,7 +47,20 @@ describe('SetupWizardService.status', () => {
     expect(access).toHaveBeenCalledWith('/data/sidecar-venv/bin/python');
   });
 
-  it("returns 'pending' when bin/python is missing", async () => {
+  it('Windows: probes the Scripts\\python.exe path supplied via opts.venvPythonBinary', async () => {
+    const access = vi.fn(async (_p: string) => undefined);
+    const svc = new SetupWizardService({
+      ...WIN_OPTS,
+      spawn: vi.fn(),
+      fs: { access },
+    } as never);
+    expect(await svc.status()).toBe('ready');
+    expect(access).toHaveBeenCalledWith(
+      'C:\\Users\\u\\AppData\\Roaming\\Shorts AI\\sidecar-venv\\Scripts\\python.exe',
+    );
+  });
+
+  it("returns 'pending' when the venv python is missing", async () => {
     const access = vi.fn(async () => {
       throw new Error('ENOENT');
     });
@@ -74,6 +96,33 @@ describe('SetupWizardService.run', () => {
       2,
       '/r/uv',
       ['pip', 'install', '--python', '/data/sidecar-venv/bin/python', '-r', '/r/requirements.txt'],
+      expect.anything(),
+    );
+  });
+
+  it('Windows: uv pip install is given the Scripts\\python.exe path from opts.venvPythonBinary', async () => {
+    const { spawn, children } = makeSpawn();
+    const svc = new SetupWizardService({
+      ...WIN_OPTS,
+      spawn,
+      fs: { access: vi.fn(async () => undefined) },
+    } as never);
+    const promise = svc.run();
+    setImmediate(() => children[0]!.emit('exit', 0));
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => children[1]!.emit('exit', 0));
+    await promise;
+    expect(spawn).toHaveBeenNthCalledWith(
+      2,
+      WIN_OPTS.uvBinary,
+      [
+        'pip',
+        'install',
+        '--python',
+        'C:\\Users\\u\\AppData\\Roaming\\Shorts AI\\sidecar-venv\\Scripts\\python.exe',
+        '-r',
+        WIN_OPTS.requirementsPath,
+      ],
       expect.anything(),
     );
   });

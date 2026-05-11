@@ -11,6 +11,13 @@ export interface SetupWizardOptions {
   uvBinary: string;
   pythonRuntime: string;
   venvPath: string;
+  /**
+   * Path to the venv's python interpreter — `<venvPath>/bin/python` on mac
+   * and Linux, `<venvPath>\Scripts\python.exe` on Windows. The wizard probes
+   * this path to detect a ready venv and passes it as `uv pip install
+   * --python`. Hardcoding `${venvPath}/bin/python` would break Windows.
+   */
+  venvPythonBinary: string;
   requirementsPath: string;
   spawn: SpawnLike;
   fs: FsLike;
@@ -32,7 +39,7 @@ export class SetupWizardService {
 
   async status(): Promise<SetupStatus> {
     try {
-      await this.opts.fs.access(`${this.opts.venvPath}/bin/python`);
+      await this.opts.fs.access(this.opts.venvPythonBinary);
       return 'ready';
     } catch {
       return 'pending';
@@ -55,7 +62,7 @@ export class SetupWizardService {
     this.emit({ phase: 'venv', pct: 1 });
     await this.spawnAndWait(
       this.opts.uvBinary,
-      ['pip', 'install', '--python', `${this.opts.venvPath}/bin/python`, '-r', this.opts.requirementsPath],
+      ['pip', 'install', '--python', this.opts.venvPythonBinary, '-r', this.opts.requirementsPath],
       'pip',
     );
   }

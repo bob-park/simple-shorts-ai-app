@@ -33,6 +33,7 @@ describe('resolveRuntimePaths', () => {
     expect(r.requirementsPath).toBe(join(MAC_PACKAGED_CTX.resourcesPath, 'requirements.txt'));
     expect(r.sidecarCwd).toBe(MAC_PACKAGED_CTX.resourcesPath);
     expect(r.venvPath).toBe(join(MAC_PACKAGED_CTX.userDataPath, 'sidecar-venv'));
+    expect(r.venvPythonBinary).toBe(join(MAC_PACKAGED_CTX.userDataPath, 'sidecar-venv', 'bin', 'python'));
     expect(r.sidecarSpawn.command).toBe(join(MAC_PACKAGED_CTX.userDataPath, 'sidecar-venv', 'bin', 'python'));
     expect(r.sidecarSpawn.args).toEqual(['-m', 'shorts_sidecar']);
     expect(r.sidecarEnv).toEqual({ PYTHONPATH: join(MAC_PACKAGED_CTX.resourcesPath, 'sidecar-src') });
@@ -45,6 +46,7 @@ describe('resolveRuntimePaths', () => {
     expect(r.pythonRuntime).toBe('python3.11');
     expect(r.ytdlpBinary).toBe('');
     expect(r.venvPath).toBe('/repo/sidecar/.venv');
+    expect(r.venvPythonBinary).toBe('/repo/sidecar/.venv/bin/python');
     expect(r.requirementsPath).toBe('/repo/sidecar/requirements.txt');
     expect(r.sidecarCwd).toBe('/repo/sidecar');
     expect(r.sidecarSpawn.command).toBe('uv');
@@ -85,6 +87,9 @@ describe('resolveRuntimePaths', () => {
     expect(r.ffmpegBinary).toBe(join(WIN_PACKAGED_CTX.resourcesPath, 'ffmpeg.exe'));
     expect(r.ytdlpBinary).toBe(join(WIN_PACKAGED_CTX.resourcesPath, 'yt-dlp.exe'));
     expect(r.venvPath).toBe(join(WIN_PACKAGED_CTX.userDataPath, 'sidecar-venv'));
+    expect(r.venvPythonBinary).toBe(
+      join(WIN_PACKAGED_CTX.userDataPath, 'sidecar-venv', 'Scripts', 'python.exe'),
+    );
     expect(r.sidecarSpawn.command).toBe(
       join(WIN_PACKAGED_CTX.userDataPath, 'sidecar-venv', 'Scripts', 'python.exe'),
     );
@@ -96,6 +101,7 @@ describe('resolveRuntimePaths', () => {
     const r = resolveRuntimePaths(WIN_DEV_CTX);
     expect(r.ffmpegBinary).toBe(join('C:\\repo', 'build-resources', 'win-x64', 'ffmpeg.exe'));
     expect(r.pythonRuntime).toBe('python3.11');
+    expect(r.venvPythonBinary).toBe(join('C:\\repo', 'sidecar', '.venv', 'Scripts', 'python.exe'));
   });
 
   it('Windows dev without bundled ffmpeg: ffmpegBinary falls back to "ffmpeg.exe"', () => {
