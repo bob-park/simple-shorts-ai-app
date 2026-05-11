@@ -35,33 +35,41 @@ export interface ResolveRuntimePathsContext {
 }
 
 export function resolveRuntimePaths(ctx: ResolveRuntimePathsContext): RuntimePaths {
+  const isWin = ctx.platform === 'win32';
+  const exe = isWin ? '.exe' : '';
+  // uv-created venv layout differs by platform.
+  const venvBin = isWin ? 'Scripts' : 'bin';
+  // python-build-standalone places the interpreter at different paths:
+  //   mac-arm64 : python-runtime/bin/python3.11
+  //   win-x64   : python-runtime/python.exe
+  const pythonInRuntime = isWin ? ['python.exe'] : ['bin', 'python3.11'];
+
   if (ctx.isPackaged) {
     const r = ctx.resourcesPath;
     const venvPath = join(ctx.userDataPath, 'sidecar-venv');
     return {
-      uvBinary: join(r, 'uv'),
-      pythonRuntime: join(r, 'python-runtime', 'bin', 'python3.11'),
+      uvBinary: join(r, `uv${exe}`),
+      pythonRuntime: join(r, 'python-runtime', ...pythonInRuntime),
       venvPath,
       requirementsPath: join(r, 'requirements.txt'),
-      ffmpegBinary: join(r, 'ffmpeg'),
-      ytdlpBinary: join(r, 'yt-dlp'),
+      ffmpegBinary: join(r, `ffmpeg${exe}`),
+      ytdlpBinary: join(r, `yt-dlp${exe}`),
       sidecarCwd: r,
       sidecarSpawn: {
-        command: join(venvPath, 'bin', 'python'),
+        command: join(venvPath, venvBin, `python${exe}`),
         args: ['-m', 'shorts_sidecar'],
       },
       sidecarEnv: { PYTHONPATH: join(r, 'sidecar-src') },
     };
   }
-  // Dev mode — same logic as before, but build-resources path is now
-  // <platform>-<arch>-keyed (mac-arm64) instead of <arch> alone (arm64).
-  // See electron-builder.yml extraResources for the matching pattern.
-  const targetDir = `${ctx.platform === 'win32' ? 'win' : 'mac'}-${ctx.arch}`;
-  const bundledFfmpeg = join(ctx.repoRoot, 'build-resources', targetDir, 'ffmpeg');
-  const ffmpegBinary = ctx.fileExists(bundledFfmpeg) ? bundledFfmpeg : 'ffmpeg';
+
+  // Dev mode — build-resources/<platform>-<arch>/.
+  const targetDir = `${isWin ? 'win' : 'mac'}-${ctx.arch}`;
+  const bundledFfmpeg = join(ctx.repoRoot, 'build-resources', targetDir, `ffmpeg${exe}`);
+  const ffmpegBinary = ctx.fileExists(bundledFfmpeg) ? bundledFfmpeg : `ffmpeg${exe}`;
   return {
     uvBinary: 'uv',
-    pythonRuntime: 'python3.11',
+    pythonRuntime: isWin ? 'python.exe' : 'python3.11',
     venvPath: join(ctx.repoRoot, 'sidecar', '.venv'),
     requirementsPath: join(ctx.repoRoot, 'sidecar', 'requirements.txt'),
     ffmpegBinary,

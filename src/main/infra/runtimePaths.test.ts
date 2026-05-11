@@ -55,4 +55,48 @@ describe('resolveRuntimePaths', () => {
     const r = resolveRuntimePaths({ ...MAC_DEV_CTX, fileExists: () => false });
     expect(r.ffmpegBinary).toBe('ffmpeg');
   });
+
+  const WIN_PACKAGED_CTX = {
+    isPackaged: true,
+    resourcesPath: 'C:\\Users\\u\\AppData\\Local\\Programs\\Shorts AI\\resources',
+    userDataPath: 'C:\\Users\\u\\AppData\\Roaming\\Shorts AI',
+    repoRoot: 'C:\\unused-in-packaged',
+    platform: 'win32' as NodeJS.Platform,
+    arch: 'x64',
+    fileExists: () => true,
+  };
+
+  const WIN_DEV_CTX = {
+    isPackaged: false,
+    resourcesPath: 'C:\\unused-in-dev',
+    userDataPath: 'C:\\unused-in-dev',
+    repoRoot: 'C:\\repo',
+    platform: 'win32' as NodeJS.Platform,
+    arch: 'x64',
+    fileExists: (p: string) =>
+      p.endsWith('build-resources\\win-x64\\ffmpeg.exe') ||
+      p.endsWith('build-resources/win-x64/ffmpeg.exe'),
+  };
+
+  it('Windows packaged: uses .exe suffix and Scripts\\python.exe venv layout', () => {
+    const r = resolveRuntimePaths(WIN_PACKAGED_CTX);
+    expect(r.uvBinary).toBe(join(WIN_PACKAGED_CTX.resourcesPath, 'uv.exe'));
+    expect(r.pythonRuntime).toBe(join(WIN_PACKAGED_CTX.resourcesPath, 'python-runtime', 'python.exe'));
+    expect(r.ffmpegBinary).toBe(join(WIN_PACKAGED_CTX.resourcesPath, 'ffmpeg.exe'));
+    expect(r.ytdlpBinary).toBe(join(WIN_PACKAGED_CTX.resourcesPath, 'yt-dlp.exe'));
+    expect(r.venvPath).toBe(join(WIN_PACKAGED_CTX.userDataPath, 'sidecar-venv'));
+    expect(r.sidecarSpawn.command).toBe(
+      join(WIN_PACKAGED_CTX.userDataPath, 'sidecar-venv', 'Scripts', 'python.exe'),
+    );
+  });
+
+  it('Windows dev with bundled ffmpeg present: ffmpegBinary points at build-resources/win-x64/ffmpeg.exe', () => {
+    const r = resolveRuntimePaths(WIN_DEV_CTX);
+    expect(r.ffmpegBinary).toBe(join('C:\\repo', 'build-resources', 'win-x64', 'ffmpeg.exe'));
+  });
+
+  it('Windows dev without bundled ffmpeg: ffmpegBinary falls back to "ffmpeg.exe"', () => {
+    const r = resolveRuntimePaths({ ...WIN_DEV_CTX, fileExists: () => false });
+    expect(r.ffmpegBinary).toBe('ffmpeg.exe');
+  });
 });
