@@ -18,6 +18,8 @@ const baseSettings: Settings = {
     fillColor: '#FFFFFF',
     outlineColor: '#000000',
     position: 'bottom',
+    titleFontSize: 72,
+    titleFontWeight: '700',
   },
   ui: { historyView: 'list', theme: 'light' },
 };

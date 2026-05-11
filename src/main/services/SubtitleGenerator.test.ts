@@ -9,6 +9,8 @@ const STYLE = {
   fillColor: '#FFFFFF',
   outlineColor: '#000000',
   position: 'bottom' as const,
+  titleFontSize: 72,
+  titleFontWeight: '700' as const,
 };
 
 function w(text: string, start: number, end: number): Word {
@@ -36,24 +38,37 @@ describe('hexToAssColor', () => {
 });
 
 describe('buildAssFile', () => {
-  it('returns empty string when no words fall inside the clip window', () => {
+  it('returns a title-only ASS when no words fall inside the clip window', () => {
     const words = [w('hello', 0, 0.5), w('world', 0.5, 1.0)];
-    const result = buildAssFile(words, 10, 20, STYLE);
-    expect(result).toBe('');
+    const result = buildAssFile(words, 10, 20, STYLE, '제목');
+    // Non-empty and contains Title style + Title Dialogue but no Default Dialogue.
+    expect(result).not.toBe('');
+    expect(result).toContain('Style: Title,');
+    const dialogues = result.split('\n').filter((l) => l.startsWith('Dialogue:'));
+    expect(dialogues).toHaveLength(1);
+    expect(dialogues[0]).toContain(',Title,제목');
   });
 
-  it('returns empty string when given an empty words array', () => {
-    expect(buildAssFile([], 0, 30, STYLE)).toBe('');
+  it('returns a title-only ASS when given an empty words array', () => {
+    const result = buildAssFile([], 0, 30, STYLE, '제목');
+    expect(result).not.toBe('');
+    expect(result).toContain('Style: Title,');
+    const dialogues = result.split('\n').filter((l) => l.startsWith('Dialogue:'));
+    expect(dialogues).toHaveLength(1);
+    expect(dialogues[0]).toContain(',Title,제목');
+    // Title spans full clip duration (0 → 30s).
+    expect(dialogues[0]).toContain('0,0:00:00.00,0:00:30.00,Title,');
   });
 
   it('emits a complete ASS file with [Script Info], [V4+ Styles], [Events] sections', () => {
     const words = [w('hello', 0, 0.5), w('world', 0.5, 1.0)];
-    const result = buildAssFile(words, 0, 5, STYLE);
+    const result = buildAssFile(words, 0, 5, STYLE, 'TestTitle');
     expect(result).toContain('[Script Info]');
     expect(result).toContain('PlayResX: 1080');
     expect(result).toContain('PlayResY: 1920');
     expect(result).toContain('[V4+ Styles]');
     expect(result).toContain('Style: Default,Pretendard,64,');
+    expect(result).toContain('Style: Title,Pretendard,');
     expect(result).toContain('[Events]');
     expect(result).toMatch(/Dialogue: 0,/);
   });
@@ -61,8 +76,8 @@ describe('buildAssFile', () => {
   it('groups words into 2-per-cue chunks', () => {
     // 4 words → 2 cues (w0+w1, w2+w3)
     const words = [w('one', 0, 0.5), w('two', 0.5, 1.0), w('three', 1.0, 1.5), w('four', 1.5, 2.0)];
-    const result = buildAssFile(words, 0, 5, STYLE);
-    const dialogues = result.split('\n').filter((l) => l.startsWith('Dialogue:'));
+    const result = buildAssFile(words, 0, 5, STYLE, 'TestTitle');
+    const dialogues = result.split('\n').filter((l) => l.startsWith('Dialogue:') && l.includes(',Default,'));
     expect(dialogues).toHaveLength(2);
     expect(dialogues[0]).toContain('one two');
     expect(dialogues[1]).toContain('three four');
@@ -70,8 +85,8 @@ describe('buildAssFile', () => {
 
   it('handles odd word counts — last cue is single-word', () => {
     const words = [w('one', 0, 0.5), w('two', 0.5, 1.0), w('three', 1.0, 1.5)];
-    const result = buildAssFile(words, 0, 5, STYLE);
-    const dialogues = result.split('\n').filter((l) => l.startsWith('Dialogue:'));
+    const result = buildAssFile(words, 0, 5, STYLE, 'TestTitle');
+    const dialogues = result.split('\n').filter((l) => l.startsWith('Dialogue:') && l.includes(',Default,'));
     expect(dialogues).toHaveLength(2);
     expect(dialogues[0]).toContain('one two');
     expect(dialogues[1]).toContain('three');
@@ -80,42 +95,87 @@ describe('buildAssFile', () => {
   it('rebases word timestamps to clip-relative ASS time format H:MM:SS.cc', () => {
     // Word at source-time 5.25 → 5.5 should appear as 0:00:00.25 → 0:00:00.50 when clip starts at 5.0
     const words = [w('hi', 5.25, 5.5)];
-    const result = buildAssFile(words, 5, 10, STYLE);
-    const dialogue = result.split('\n').find((l) => l.startsWith('Dialogue:'))!;
+    const result = buildAssFile(words, 5, 10, STYLE, 'TestTitle');
+    const dialogue = result.split('\n').find((l) => l.startsWith('Dialogue:') && l.includes(',Default,'))!;
     expect(dialogue).toContain('0,0:00:00.25,0:00:00.50,Default,hi');
   });
 
   it('applies position=bottom → ASS Alignment 2', () => {
     const words = [w('hi', 0, 0.5)];
-    const result = buildAssFile(words, 0, 5, { ...STYLE, position: 'bottom' });
-    const styleLine = result.split('\n').find((l) => l.startsWith('Style:'))!;
+    const result = buildAssFile(words, 0, 5, { ...STYLE, position: 'bottom' }, 'TestTitle');
+    const styleLine = result.split('\n').find((l) => l.startsWith('Style: Default,'))!;
     // Format row order: Name, Fontname, Fontsize, PrimaryColour, OutlineColour,
-    // BorderStyle, Outline, Alignment, MarginV, Encoding → Alignment is column 8 (index 7).
+    // Bold, BorderStyle, Outline, Alignment, MarginV, Encoding → Alignment is column 9 (index 8).
     const cols = styleLine.replace(/^Style:\s*/, '').split(',');
-    expect(cols[7]).toBe('2');
+    expect(cols[8]).toBe('2');
   });
 
   it('applies position=middle → ASS Alignment 5', () => {
     const words = [w('hi', 0, 0.5)];
-    const result = buildAssFile(words, 0, 5, { ...STYLE, position: 'middle' });
-    const styleLine = result.split('\n').find((l) => l.startsWith('Style:'))!;
+    const result = buildAssFile(words, 0, 5, { ...STYLE, position: 'middle' }, 'TestTitle');
+    const styleLine = result.split('\n').find((l) => l.startsWith('Style: Default,'))!;
     const cols = styleLine.replace(/^Style:\s*/, '').split(',');
-    expect(cols[7]).toBe('5');
+    expect(cols[8]).toBe('5');
+  });
+
+  it('vertically centers the Default subtitle in the 320px bottom bar', () => {
+    const words = [w('hi', 0, 0.5)];
+    const result = buildAssFile(words, 0, 5, STYLE, 'TestTitle');
+    const defaultLine = result.split('\n').find((l) => l.startsWith('Style: Default,'))!;
+    const cols = defaultLine.replace(/^Style:\s*/, '').split(',');
+    // Format row: Name,Fontname,Fontsize,PrimaryColour,OutlineColour,Bold,BorderStyle,Outline,Alignment,MarginV,Encoding
+    // Default word style is never bold (col 5 = 0). With fontSize=64 and a 320px
+    // bottom bar, MarginV = (320 - 64) / 2 = 128 centers the subtitle in the bar.
+    expect(cols[5]).toBe('0');
+    expect(cols[9]).toBe('128');
+  });
+
+  it('forces MarginV=0 for the Default style when position=middle (Alignment=5 = canvas center)', () => {
+    const result = buildAssFile([w('hi', 0, 0.5)], 0, 5, { ...STYLE, position: 'middle' }, 'TestTitle');
+    const defaultLine = result.split('\n').find((l) => l.startsWith('Style: Default,'))!;
+    const cols = defaultLine.replace(/^Style:\s*/, '').split(',');
+    expect(cols[8]).toBe('5');
+    expect(cols[9]).toBe('0');
+  });
+
+  it('emits a Title style row with configured size + weight, vertically centered in the 320px top bar', () => {
+    const result = buildAssFile([], 0, 30, STYLE, 'TestTitle');
+    const titleLine = result.split('\n').find((l) => l.startsWith('Style: Title,'))!;
+    const cols = titleLine.replace(/^Style:\s*/, '').split(',');
+    // Format: Name,Fontname,Fontsize,PrimaryColour,OutlineColour,Bold,BorderStyle,Outline,Alignment,MarginV,Encoding
+    expect(cols[0]).toBe('Title');
+    expect(cols[1]).toBe('Pretendard');
+    expect(cols[2]).toBe('72'); // STYLE.titleFontSize
+    expect(cols[3]).toBe('&H00FFFFFF');
+    expect(cols[5]).toBe('700'); // STYLE.titleFontWeight (numeric Bold)
+    expect(cols[7]).toBe('0'); // Outline width 0 (title sits on solid black bar)
+    expect(cols[8]).toBe('8'); // top-center alignment
+    // (320 - 72) / 2 = 124 centers the title in the top bar.
+    expect(cols[9]).toBe('124');
+  });
+
+  it('propagates a different title font size + weight from style into the Title style row', () => {
+    const customStyle = { ...STYLE, titleFontSize: 96, titleFontWeight: '900' as const };
+    const result = buildAssFile([], 0, 30, customStyle, 'TestTitle');
+    const titleLine = result.split('\n').find((l) => l.startsWith('Style: Title,'))!;
+    const cols = titleLine.replace(/^Style:\s*/, '').split(',');
+    expect(cols[2]).toBe('96');
+    expect(cols[5]).toBe('900');
   });
 
   it('clamps cue end to clip end when a word straddles the boundary', () => {
     // word ends at 6.5 but clip ends at 6.0 → cue end should be 6.0 (= 1.0 clip-relative)
     const words = [w('hi', 5.5, 6.5)];
-    const result = buildAssFile(words, 5, 6, STYLE);
-    const dialogue = result.split('\n').find((l) => l.startsWith('Dialogue:'))!;
+    const result = buildAssFile(words, 5, 6, STYLE, 'TestTitle');
+    const dialogue = result.split('\n').find((l) => l.startsWith('Dialogue:') && l.includes(',Default,'))!;
     expect(dialogue).toContain('0,0:00:00.50,0:00:01.00,Default,hi');
   });
 
   it('applies a minimum cue duration of 0.30s for very short stutters', () => {
     // word "uh" lasts 0.05s — should be padded to at least 0.30s for readability
     const words = [w('uh', 0, 0.05)];
-    const result = buildAssFile(words, 0, 5, STYLE);
-    const dialogue = result.split('\n').find((l) => l.startsWith('Dialogue:'))!;
+    const result = buildAssFile(words, 0, 5, STYLE, 'TestTitle');
+    const dialogue = result.split('\n').find((l) => l.startsWith('Dialogue:') && l.includes(',Default,'))!;
     expect(dialogue).toContain('0,0:00:00.00,0:00:00.30,Default,uh');
   });
 
@@ -123,9 +183,18 @@ describe('buildAssFile', () => {
     // ASS uses { for override tags; literal { needs to be escaped as \{
     // Newlines in word text would break the Dialogue line.
     const words = [w('a{b}', 0, 0.5), w('c\nd', 0.5, 1.0)];
-    const result = buildAssFile(words, 0, 5, STYLE);
-    const dialogue = result.split('\n').find((l) => l.startsWith('Dialogue:'))!;
+    const result = buildAssFile(words, 0, 5, STYLE, 'TestTitle');
+    const dialogue = result.split('\n').find((l) => l.startsWith('Dialogue:') && l.includes(',Default,'))!;
     // Both words on one line (cue groups them); { escaped, \n replaced with space.
     expect(dialogue).toContain('a\\{b\\} c d');
+  });
+
+  it('escapes ASS-significant characters in the title text', () => {
+    const result = buildAssFile([], 0, 5, STYLE, 'a{b}\\c');
+    const titleDialogue = result
+      .split('\n')
+      .find((l) => l.startsWith('Dialogue:') && l.includes(',Title,'))!;
+    // { and } escaped to \{ \}; backslash escaped to \\.
+    expect(titleDialogue).toContain(',Title,a\\{b\\}\\\\c');
   });
 });

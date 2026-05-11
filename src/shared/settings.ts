@@ -12,6 +12,9 @@ export type WhisperDevice = z.infer<typeof WhisperDeviceSchema>;
 export const SubtitlePositionSchema = z.enum(['bottom', 'middle']);
 export type SubtitlePosition = z.infer<typeof SubtitlePositionSchema>;
 
+export const TitleFontWeightSchema = z.enum(['400', '500', '600', '700', '800', '900']);
+export type TitleFontWeight = z.infer<typeof TitleFontWeightSchema>;
+
 export const SettingsSchema = z.object({
   paths: z.object({
     downloads: z.string().min(1),
@@ -40,6 +43,8 @@ export const SettingsSchema = z.object({
     fillColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
     outlineColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
     position: SubtitlePositionSchema,
+    titleFontSize: z.number().int().min(32).max(120),
+    titleFontWeight: TitleFontWeightSchema,
   }),
   ui: z.object({
     historyView: z.enum(['list', 'thumbnails']),
@@ -75,6 +80,8 @@ export const DEFAULT_SETTINGS_TEMPLATE: Omit<Settings, 'paths'> & {
     fillColor: '#FFFFFF',
     outlineColor: '#000000',
     position: 'bottom',
+    titleFontSize: 72,
+    titleFontWeight: '700',
   },
   ui: {
     historyView: 'list',
