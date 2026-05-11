@@ -65,7 +65,17 @@ export function resolveRuntimePaths(ctx: ResolveRuntimePathsContext): RuntimePat
       sidecarCwd: r,
       venvPythonBinary,
       sidecarSpawn: { command: venvPythonBinary, args: ['-m', 'shorts_sidecar'] },
-      sidecarEnv: { PYTHONPATH: join(r, 'sidecar-src') },
+      // PYTHONUTF8 / PYTHONIOENCODING force the sidecar's stdin/stdout/stderr
+      // to UTF-8 regardless of the OS locale. Without this, Python 3.11 on
+      // Windows falls back to the system codepage (cp949 / cp1252) with
+      // surrogateescape, which mangles non-ASCII filenames (Korean / Japanese
+      // / accented Latin) coming through the JSON-RPC line we write from Node
+      // — even though Node writes valid UTF-8 bytes. See PEP 540.
+      sidecarEnv: {
+        PYTHONPATH: join(r, 'sidecar-src'),
+        PYTHONUTF8: '1',
+        PYTHONIOENCODING: 'utf-8',
+      },
     };
   }
 
@@ -84,6 +94,13 @@ export function resolveRuntimePaths(ctx: ResolveRuntimePathsContext): RuntimePat
     sidecarCwd: join(ctx.repoRoot, 'sidecar'),
     venvPythonBinary: join(venvPath, venvBin, `python${exe}`),
     sidecarSpawn: { command: 'uv', args: ['run', 'python', '-m', 'shorts_sidecar'] },
-    sidecarEnv: {},
+    // Same UTF-8 forcing as packaged mode — see comment above. macOS/Linux
+    // dev shells almost always already resolve to UTF-8 so this is a no-op
+    // there, but it makes Windows dev work the same as the packaged build
+    // if anyone ever runs `yarn dev` on a Windows host.
+    sidecarEnv: {
+      PYTHONUTF8: '1',
+      PYTHONIOENCODING: 'utf-8',
+    },
   };
 }
