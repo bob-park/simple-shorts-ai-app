@@ -283,6 +283,23 @@ const CROP_TRACKED_RHS = `crop@c=ih*${VIDEO_CROP_NUM}/${VIDEO_CROP_DEN}:ih:0:0`;
 const SCALE_EXPR = `scale=${SHORT_LAYOUT.outputWidth}:${SHORT_LAYOUT.videoHeight}`;
 const PAD_EXPR = `pad=${SHORT_LAYOUT.outputWidth}:${SHORT_LAYOUT.outputHeight}:0:${SHORT_LAYOUT.topBarHeight}:black`;
 
+/**
+ * Format a filter option value so ffmpeg's filter graph parser passes it as
+ * a literal string, regardless of which metacharacters it contains. Wrap in
+ * single quotes (level-1 quoting), then escape the only chars special INSIDE
+ * single quotes — `\` and `'`. This survives both filter-graph (`,` `;` `[`
+ * `]`) and filter-option (`:`) metacharacters, which is mandatory on Windows
+ * where every absolute path contains `:` (drive-letter colon) and `\` (path
+ * separator); without this the parser dies at `sendcmd=f=C:\...,` because it
+ * reads `C` as the value of `f` and starts parsing the next option at `\`.
+ *
+ * Exported for unit testing — the platform-dependent `path.join` in callers
+ * makes integration assertions with backslashes awkward on a POSIX test host.
+ */
+export function ffmpegFilterValue(arg: string): string {
+  return `'${arg.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+}
+
 function buildVfChain(segments: HighlightSegment[], cropClause: string): string {
   return `select='${buildSelectExpr(segments)}',setpts=N/FRAME_RATE/TB,${cropClause},${SCALE_EXPR},${PAD_EXPR}`;
 }
@@ -311,7 +328,7 @@ function buildTrackedArgs(
   outputPath: string,
   cmdPath: string,
 ): string[] {
-  const cropClause = `sendcmd=f=${cmdPath},${CROP_TRACKED_RHS}`;
+  const cropClause = `sendcmd=f=${ffmpegFilterValue(cmdPath)},${CROP_TRACKED_RHS}`;
   return [
     '-y',
     '-i',
@@ -329,7 +346,10 @@ function appendSubtitleFilter(args: readonly string[], assPath: string): string[
   const out = [...args];
   const vfIndex = out.indexOf('-vf');
   if (vfIndex === -1) return out;
-  // Single-quote the path so ffmpeg's filter parser tolerates spaces.
-  out[vfIndex + 1] = `${out[vfIndex + 1]},subtitles=filename='${assPath}'`;
+  // ffmpegFilterValue() handles single-quoting AND escaping `\`/`'` inside
+  // the quotes. Required on Windows: a bare `'C:\Users\…\file.ass'` value
+  // would let ffmpeg's level-1 parser treat each `\X` as an escape sequence
+  // and silently drop characters from the path.
+  out[vfIndex + 1] = `${out[vfIndex + 1]},subtitles=filename=${ffmpegFilterValue(assPath)}`;
   return out;
 }
