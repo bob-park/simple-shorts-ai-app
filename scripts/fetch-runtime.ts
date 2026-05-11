@@ -9,7 +9,7 @@
  */
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { mkdir, readFile, rename } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -155,11 +155,10 @@ async function unpackFfmpeg(archivePath: string, destFile: string, target: Targe
   //   1. osxexperts.net (mac):  <extractDir>/ffmpeg            — single binary at root
   //   2. BtbN (win):            <extractDir>/<inner>/bin/ffmpeg.exe
   const macFlat = join(extractDir, 'ffmpeg');
-  if (existsSync(macFlat)) {
+  if (existsSync(macFlat) && statSync(macFlat).isFile()) {
     await spawn2('cp', [macFlat, destFile]);
   } else {
     // BtbN nested: <extractDir>/ffmpeg-*-win64-gpl-*/bin/ffmpeg.exe
-    const { readdirSync } = await import('node:fs');
     const subdirs = readdirSync(extractDir, { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => d.name);
