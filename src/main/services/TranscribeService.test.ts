@@ -26,14 +26,30 @@ describe('TranscribeService', () => {
 
   it('calls sidecar.request with the right method and params', async () => {
     request.mockResolvedValue(validRaw);
-    const result = await service.transcribe('/tmp/a.mp4', { model: 'small', language: 'auto' });
+    const result = await service.transcribe('/tmp/a.mp4', {
+      model: 'small',
+      language: 'auto',
+      device: 'cpu',
+    });
     expect(request).toHaveBeenCalledWith('transcribe', {
       audio_path: '/tmp/a.mp4',
       model: 'small',
       language: 'auto',
+      device: 'cpu',
     });
     expect(result.duration).toBe(4.0);
     expect(result.segments[0].text).toBe('hi');
+  });
+
+  it("defaults device to 'auto' when caller omits it", async () => {
+    request.mockResolvedValue(validRaw);
+    await service.transcribe('/tmp/a.mp4', { model: 'small' });
+    expect(request).toHaveBeenCalledWith('transcribe', {
+      audio_path: '/tmp/a.mp4',
+      model: 'small',
+      language: 'auto',
+      device: 'auto',
+    });
   });
 
   it('rejects malformed sidecar payloads via the schema', async () => {
