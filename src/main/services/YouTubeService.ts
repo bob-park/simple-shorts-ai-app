@@ -128,7 +128,14 @@ export class YouTubeService {
     if (this.deps.ffmpegLocation) {
       args.push('--ffmpeg-location', this.deps.ffmpegLocation);
     }
-    const child = this.deps.spawn(this.deps.binaryPath ?? 'yt-dlp', args, {});
+    // PYTHONUTF8 forces yt-dlp's embedded Python to use UTF-8 for stdio +
+    // open() defaults, regardless of the OS codepage. Critical on Windows so
+    // the path written to --print-to-file (which we read back as UTF-8) is
+    // actually UTF-8, not cp949/cp1252 with surrogateescape mojibake on
+    // non-ASCII filenames.
+    const child = this.deps.spawn(this.deps.binaryPath ?? 'yt-dlp', args, {
+      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
+    });
 
     const progressCallbacks: ((p: DownloadProgress) => void)[] = [];
     let stderrBuffer = '';

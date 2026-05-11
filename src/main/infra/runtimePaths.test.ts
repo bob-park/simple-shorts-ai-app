@@ -36,7 +36,11 @@ describe('resolveRuntimePaths', () => {
     expect(r.venvPythonBinary).toBe(join(MAC_PACKAGED_CTX.userDataPath, 'sidecar-venv', 'bin', 'python'));
     expect(r.sidecarSpawn.command).toBe(join(MAC_PACKAGED_CTX.userDataPath, 'sidecar-venv', 'bin', 'python'));
     expect(r.sidecarSpawn.args).toEqual(['-m', 'shorts_sidecar']);
-    expect(r.sidecarEnv).toEqual({ PYTHONPATH: join(MAC_PACKAGED_CTX.resourcesPath, 'sidecar-src') });
+    expect(r.sidecarEnv).toEqual({
+      PYTHONPATH: join(MAC_PACKAGED_CTX.resourcesPath, 'sidecar-src'),
+      PYTHONUTF8: '1',
+      PYTHONIOENCODING: 'utf-8',
+    });
   });
 
   it('macOS dev with bundled ffmpeg present: ffmpegBinary points at build-resources/mac-arm64/ffmpeg', () => {
@@ -51,6 +55,7 @@ describe('resolveRuntimePaths', () => {
     expect(r.sidecarCwd).toBe('/repo/sidecar');
     expect(r.sidecarSpawn.command).toBe('uv');
     expect(r.sidecarSpawn.args).toEqual(['run', 'python', '-m', 'shorts_sidecar']);
+    expect(r.sidecarEnv).toEqual({ PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' });
   });
 
   it('macOS dev without bundled ffmpeg: ffmpegBinary falls back to PATH name "ffmpeg"', () => {
@@ -94,7 +99,11 @@ describe('resolveRuntimePaths', () => {
       join(WIN_PACKAGED_CTX.userDataPath, 'sidecar-venv', 'Scripts', 'python.exe'),
     );
     expect(r.sidecarCwd).toBe(WIN_PACKAGED_CTX.resourcesPath);
-    expect(r.sidecarEnv).toEqual({ PYTHONPATH: join(WIN_PACKAGED_CTX.resourcesPath, 'sidecar-src') });
+    expect(r.sidecarEnv).toEqual({
+      PYTHONPATH: join(WIN_PACKAGED_CTX.resourcesPath, 'sidecar-src'),
+      PYTHONUTF8: '1',
+      PYTHONIOENCODING: 'utf-8',
+    });
   });
 
   it('Windows dev with bundled ffmpeg present: ffmpegBinary points at build-resources/win-x64/ffmpeg.exe', () => {

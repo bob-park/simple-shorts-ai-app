@@ -344,6 +344,11 @@ void app.whenReady().then(() => {
     if (flags.noWarnings) args.push('--no-warnings');
     const { stdout } = await execFileP(ytdlpBinaryPath, args, {
       maxBuffer: 64 * 1024 * 1024,
+      // Force yt-dlp's embedded Python to UTF-8 stdio on Windows — without
+      // this, --dump-single-json output would be cp949/cp1252-encoded and
+      // JSON.parse on Node's UTF-8 read would mojibake non-ASCII title /
+      // uploader fields. See YouTubeService.download for the same env reason.
+      env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
     });
     return JSON.parse(stdout);
   };
