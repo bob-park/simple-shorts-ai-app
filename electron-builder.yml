@@ -14,6 +14,7 @@ asar: true
 asarUnpack:
   # better-sqlite3 has a native .node binding that can't run from inside asar
   - '**/node_modules/better-sqlite3/**'
+
 mac:
   category: public.app-category.video
   target:
@@ -22,19 +23,50 @@ mac:
   identity: null
   hardenedRuntime: false
   minimumSystemVersion: '12.0'
+  # Platform-specific binaries (no .exe suffix on macOS).
+  extraResources:
+    - from: build-resources/mac-${arch}/uv
+      to: uv
+    - from: build-resources/mac-${arch}/ffmpeg
+      to: ffmpeg
+    - from: build-resources/mac-${arch}/yt-dlp
+      to: yt-dlp
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # We don't sign — explicitly disable so electron-builder doesn't try to
+  # invoke signtool via wine (which would fail on macOS hosts).
+  signAndEditExecutable: false
+  # Platform-specific binaries (.exe suffix on Windows).
+  extraResources:
+    - from: build-resources/win-${arch}/uv.exe
+      to: uv.exe
+    - from: build-resources/win-${arch}/ffmpeg.exe
+      to: ffmpeg.exe
+    - from: build-resources/win-${arch}/yt-dlp.exe
+      to: yt-dlp.exe
+
+nsis:
+  oneClick: false                        # show install wizard, let user pick install dir
+  perMachine: false                      # install into %LOCALAPPDATA% (no admin prompt)
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Shorts AI
+
+# ${os} → 'mac' | 'win' | 'linux'; ${arch} → 'arm64' | 'x64'.
+# python-runtime, requirements.txt, and sidecar-src are shared across platforms
+# (no extension difference). The per-platform binary entries are in mac:/win: above.
 extraResources:
-  - from: build-resources/${arch}/python-runtime
+  - from: build-resources/${os}-${arch}/python-runtime
     to: python-runtime
-  - from: build-resources/${arch}/uv
-    to: uv
-  - from: build-resources/${arch}/ffmpeg
-    to: ffmpeg
-  - from: build-resources/${arch}/yt-dlp
-    to: yt-dlp
   - from: sidecar/requirements.txt
     to: requirements.txt
   - from: sidecar/src
     to: sidecar-src
+
 dmg:
   title: Shorts AI ${version}
   iconSize: 128
