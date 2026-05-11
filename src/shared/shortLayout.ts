@@ -1,5 +1,5 @@
 /**
- * Output canvas + crop-aspect constants for the rendered 9:16 short.
+ * Output canvas + crop-aspect constants for the rendered short (1080×1920 9:16 canvas with 3:4 inner crop region).
  *
  * The short has 240px black bars at top and bottom (for the title and the
  * burned-in subtitle), so the inner video region is 1080×1440 (3:4 aspect)
