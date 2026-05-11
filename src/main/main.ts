@@ -16,6 +16,7 @@ import youtubeDl from 'youtube-dl-exec';
 import { FfmpegRunner } from './infra/FfmpegRunner';
 import { HistoryRepo } from './infra/HistoryRepo';
 import { PythonSidecar } from './infra/PythonSidecar';
+import { resolveRuntimePaths as resolveRuntimePathsImpl, type RuntimePaths } from './infra/runtimePaths';
 import { SettingsStore } from './infra/SettingsStore';
 import { SidecarLlmClient } from './infra/SidecarLlmClient';
 import { HighlightService } from './services/HighlightService';
@@ -31,76 +32,16 @@ import { type DownloadHandle, YouTubeService } from './services/YouTubeService';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const isDev = !app.isPackaged;
 
-interface RuntimePaths {
-  uvBinary: string;
-  pythonRuntime: string;
-  venvPath: string;
-  requirementsPath: string;
-  ffmpegBinary: string;
-  /**
-   * Standalone yt-dlp binary (PyInstaller single-file). Used instead of
-   * youtube-dl-exec's bundled zipapp because the zipapp shells out to system
-   * Python, and macOS's system Python (3.9 from CommandLineTools) is too old
-   * for current yt-dlp (requires 3.10+).
-   */
-  ytdlpBinary: string;
-  sidecarCwd: string;
-  /**
-   * In packaged mode, sidecar is launched as the venv's python directly;
-   * in dev mode, `uv run python -m shorts_sidecar` (which auto-resolves the
-   * venv via uv).
-   */
-  sidecarSpawn: { command: string; args: string[] };
-  /**
-   * Extra env vars for the sidecar spawn. In packaged mode, PYTHONPATH points
-   * at the bundled `shorts_sidecar` package source so `python -m shorts_sidecar`
-   * resolves it (uv pip install only installs deps, not our own package).
-   */
-  sidecarEnv: Record<string, string>;
-}
-
 function resolveRuntimePaths(): RuntimePaths {
-  if (app.isPackaged) {
-    const r = process.resourcesPath;
-    const venvPath = join(app.getPath('userData'), 'sidecar-venv');
-    return {
-      uvBinary: join(r, 'uv'),
-      pythonRuntime: join(r, 'python-runtime', 'bin', 'python3.11'),
-      venvPath,
-      requirementsPath: join(r, 'requirements.txt'),
-      ffmpegBinary: join(r, 'ffmpeg'),
-      ytdlpBinary: join(r, 'yt-dlp'),
-      sidecarCwd: r,
-      sidecarSpawn: {
-        command: join(venvPath, 'bin', 'python'),
-        args: ['-m', 'shorts_sidecar'],
-      },
-      sidecarEnv: { PYTHONPATH: join(r, 'sidecar-src') },
-    };
-  }
-  // Dev mode — same behavior as before
-  const repoRoot = resolvePath(__dirname, '../../');
-  // Prefer the bundled ffmpeg (built with libass) over PATH-resolved system
-  // ffmpeg when build-resources is populated. Homebrew's default ffmpeg in
-  // recent versions omits --enable-libass, which silently strips the
-  // `subtitles=` filter and breaks title + caption rendering. Falls back to
-  // PATH 'ffmpeg' when build-resources/<arch>/ffmpeg is absent (i.e., user
-  // hasn't run `yarn prepackage` yet).
-  const bundledFfmpeg = join(repoRoot, 'build-resources', process.arch, 'ffmpeg');
-  const ffmpegBinary = existsSync(bundledFfmpeg) ? bundledFfmpeg : 'ffmpeg';
-  return {
-    uvBinary: 'uv',
-    pythonRuntime: 'python3.11',
-    venvPath: join(repoRoot, 'sidecar', '.venv'),
-    requirementsPath: join(repoRoot, 'sidecar', 'requirements.txt'),
-    ffmpegBinary,
-    // Dev mode: fall back to youtube-dl-exec's bundled zipapp via the
-    // shell's PATH-resolved python3 (mise/asdf/system 3.10+).
-    ytdlpBinary: '',
-    sidecarCwd: join(repoRoot, 'sidecar'),
-    sidecarSpawn: { command: 'uv', args: ['run', 'python', '-m', 'shorts_sidecar'] },
-    sidecarEnv: {},
-  };
+  return resolveRuntimePathsImpl({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    userDataPath: app.getPath('userData'),
+    repoRoot: resolvePath(__dirname, '../../'),
+    platform: process.platform,
+    arch: process.arch,
+    fileExists: existsSync,
+  });
 }
 
 // Local LLM model identity — single source of truth for both extract:run's
