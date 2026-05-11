@@ -82,7 +82,7 @@ describe('RenderService', () => {
     expect(result.results[1]!.outputPath).toBe('/tmp/out/short_2.mp4');
   });
 
-  it('builds ffmpeg args with select-filter cuts, the 9:16 crop+scale filter, libx264, and aac', async () => {
+  it('builds ffmpeg args with select cuts, the 3:4 crop + 1080×1440 scale + 1080×1920 pad filter chain, libx264, and aac', async () => {
     const h = fakeRunHandle();
     run.mockReturnValue(h);
     const promise = service.render({

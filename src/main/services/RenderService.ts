@@ -105,7 +105,7 @@ export class RenderService {
         : appendSubtitleFilter(baseArgs, assInfo.assPath);
       // For the user-facing RenderClipResult.subtitles field, only report a
       // populated subtitles record when at least one word cue was emitted AND
-      // the filter was actually applied. A title-only ASS (cueCount=0) or a
+      // the filter was actually applied. A title-only ASS (cues=0) or a
       // run where subtitlesUnavailable is set both produce null here.
       const reportedSubtitles =
         !this.subtitlesUnavailable && assInfo.cues > 0 ? assInfo : null;
