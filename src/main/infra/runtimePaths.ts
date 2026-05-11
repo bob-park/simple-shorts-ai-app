@@ -69,7 +69,7 @@ export function resolveRuntimePaths(ctx: ResolveRuntimePathsContext): RuntimePat
   const ffmpegBinary = ctx.fileExists(bundledFfmpeg) ? bundledFfmpeg : `ffmpeg${exe}`;
   return {
     uvBinary: 'uv',
-    pythonRuntime: isWin ? 'python.exe' : 'python3.11',
+    pythonRuntime: 'python3.11',
     venvPath: join(ctx.repoRoot, 'sidecar', '.venv'),
     requirementsPath: join(ctx.repoRoot, 'sidecar', 'requirements.txt'),
     ffmpegBinary,

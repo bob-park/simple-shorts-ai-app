@@ -88,11 +88,14 @@ describe('resolveRuntimePaths', () => {
     expect(r.sidecarSpawn.command).toBe(
       join(WIN_PACKAGED_CTX.userDataPath, 'sidecar-venv', 'Scripts', 'python.exe'),
     );
+    expect(r.sidecarCwd).toBe(WIN_PACKAGED_CTX.resourcesPath);
+    expect(r.sidecarEnv).toEqual({ PYTHONPATH: join(WIN_PACKAGED_CTX.resourcesPath, 'sidecar-src') });
   });
 
   it('Windows dev with bundled ffmpeg present: ffmpegBinary points at build-resources/win-x64/ffmpeg.exe', () => {
     const r = resolveRuntimePaths(WIN_DEV_CTX);
     expect(r.ffmpegBinary).toBe(join('C:\\repo', 'build-resources', 'win-x64', 'ffmpeg.exe'));
+    expect(r.pythonRuntime).toBe('python3.11');
   });
 
   it('Windows dev without bundled ffmpeg: ffmpegBinary falls back to "ffmpeg.exe"', () => {
