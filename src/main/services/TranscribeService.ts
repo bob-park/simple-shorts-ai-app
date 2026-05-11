@@ -10,6 +10,15 @@ interface SidecarLike {
 export interface TranscribeOptions {
   model: string;
   language?: string;
+  /**
+   * Whisper compute device — `'auto'`, `'cpu'`, `'cuda'`, or `'metal'`.
+   * Forwarded to the sidecar which passes it as `WhisperModel(device=…)`.
+   * Callers should resolve `'auto'` to a concrete device per platform
+   * before invoking — `'auto'` on Windows triggers CTranslate2's CUDA
+   * probe which tries to load cublas64_12.dll and fails on machines
+   * without an NVIDIA stack. main.ts does this resolution.
+   */
+  device?: string;
 }
 
 export class TranscribeService {
@@ -20,6 +29,7 @@ export class TranscribeService {
       audio_path: audioPath,
       model: opts.model,
       language: opts.language ?? 'auto',
+      device: opts.device ?? 'auto',
     });
     return TranscriptSchema.parse(raw);
   }

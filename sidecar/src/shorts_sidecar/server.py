@@ -118,6 +118,7 @@ class Server:
                 params.get("audio_path"),
                 model=params.get("model", "small"),
                 language=params.get("language"),
+                device=params.get("device", "auto"),
                 is_canceled=self._cancel_event.is_set,
             )
             for item in stream:

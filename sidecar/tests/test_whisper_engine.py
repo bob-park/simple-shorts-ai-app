@@ -130,3 +130,34 @@ def test_engine_passes_word_timestamps_flag():
     list(engine.transcribe("/tmp/a.mp4", model="small"))
     assert factory_calls[0].transcribe_args is not None
     assert factory_calls[0].transcribe_args.get("word_timestamps") is True
+
+
+def test_engine_forwards_device_kwarg_to_factory():
+    """Device must reach WhisperModel(device=…). Without this plumbing the
+    factory falls back to faster-whisper's default 'auto', which on Windows
+    triggers CTranslate2's CUDA probe and fails on machines without cublas."""
+    received_kwargs: list[dict] = []
+
+    def factory(model: str, **kwargs):
+        received_kwargs.append(kwargs)
+        return FakeWhisperModel(model)
+
+    engine = WhisperEngine(model_factory=factory)
+    list(engine.transcribe("/tmp/a.mp4", model="small", device="cpu"))
+    assert received_kwargs == [{"device": "cpu"}]
+
+
+def test_engine_caches_separately_by_device():
+    """Same model name with different device must construct two underlying
+    WhisperModel instances — the cache key is (model, device)."""
+    created: list[tuple[str, str]] = []
+
+    def factory(model: str, **kwargs):
+        created.append((model, kwargs["device"]))
+        return FakeWhisperModel(model)
+
+    engine = WhisperEngine(model_factory=factory)
+    list(engine.transcribe("/tmp/a.mp4", model="small", device="cpu"))
+    list(engine.transcribe("/tmp/b.mp4", model="small", device="cpu"))  # cache hit
+    list(engine.transcribe("/tmp/c.mp4", model="small", device="cuda"))  # cache miss
+    assert created == [("small", "cpu"), ("small", "cuda")]

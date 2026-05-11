@@ -37,8 +37,13 @@ class StubEngine:
     def loaded_models(self):
         return ["stub"]
 
-    def transcribe(self, audio_path, *, model, language=None, is_canceled=None):
-        self.last_args = {"audio_path": audio_path, "model": model, "language": language}
+    def transcribe(self, audio_path, *, model, language=None, device="auto", is_canceled=None):
+        self.last_args = {
+            "audio_path": audio_path,
+            "model": model,
+            "language": language,
+            "device": device,
+        }
         for item in self._sequence:
             if is_canceled and is_canceled():
                 raise InterruptedError
@@ -100,7 +105,7 @@ def test_cancel_during_transcribe_emits_canceled_error():
     class SlowEngine:
         loaded_models = []
 
-        def transcribe(self, audio_path, *, model, language=None, is_canceled=None):
+        def transcribe(self, audio_path, *, model, language=None, device="auto", is_canceled=None):
             yield TranscribeProgress(processed=1.0, total=10.0)
             for _ in range(50):
                 if is_canceled and is_canceled():

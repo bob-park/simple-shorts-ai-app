@@ -36,25 +36,35 @@ def _default_factory(model: str, **kwargs: Any):  # pragma: no cover - integrati
 
 
 class WhisperEngine:
-    """Loads models lazily on first use, caches by model name.
+    """Loads models lazily on first use, caches by (model, device).
 
     `transcribe()` is a generator that yields `TranscribeProgress` per segment
     and finally a `TranscribeResult`. If `is_canceled()` ever returns True,
     raises `InterruptedError` mid-iteration.
+
+    `device` is plumbed through to `WhisperModel(device=...)`. Using the
+    faster-whisper default `'auto'` on Windows triggers CTranslate2's CUDA
+    probe which eagerly loads `cublas64_12.dll` — on a machine without the
+    NVIDIA stack installed that fails with the user-visible error
+    `Library cublas64_12.dll is not found or cannot be loaded`. Passing
+    `'cpu'` skips the CUDA probe entirely. The caller (main.ts) is
+    responsible for resolving `'auto'` to a concrete device per platform.
     """
 
     def __init__(self, model_factory: ModelFactory = _default_factory) -> None:
         self._factory = model_factory
-        self._cache: dict[str, _ModelLike] = {}
+        self._cache: dict[tuple[str, str], _ModelLike] = {}
 
     @property
     def loaded_models(self) -> list[str]:
-        return list(self._cache.keys())
+        # Distinct model names (a single model loaded for two devices is still one model).
+        return sorted({name for (name, _device) in self._cache})
 
-    def _get(self, model: str) -> _ModelLike:
-        if model not in self._cache:
-            self._cache[model] = self._factory(model)
-        return self._cache[model]
+    def _get(self, model: str, device: str) -> _ModelLike:
+        key = (model, device)
+        if key not in self._cache:
+            self._cache[key] = self._factory(model, device=device)
+        return self._cache[key]
 
     def transcribe(
         self,
@@ -62,9 +72,10 @@ class WhisperEngine:
         *,
         model: str,
         language: str | None = None,
+        device: str = "auto",
         is_canceled: Callable[[], bool] | None = None,
     ) -> Iterator[TranscribeProgress | TranscribeResult]:
-        whisper = self._get(model)
+        whisper = self._get(model, device)
         kwargs: dict[str, Any] = {"word_timestamps": True}
         if language and language != "auto":
             kwargs["language"] = language

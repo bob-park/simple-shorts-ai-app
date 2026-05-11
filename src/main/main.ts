@@ -447,9 +447,19 @@ void app.whenReady().then(() => {
     try {
       const service = getTranscribeService();
       const settings = settingsStore.get();
+      // Resolve 'auto' to a concrete device per platform. On Windows we don't
+      // ship the NVIDIA CUDA stack, so faster-whisper's default 'auto' would
+      // probe CUDA, try to LoadLibrary("cublas64_12.dll"), and fail at the
+      // first encode call. Pin it to 'cpu' so the CUDA path is skipped
+      // entirely. mac/Linux 'auto' resolves naturally (no CUDA on mac;
+      // Linux behaves the same as Windows but we don't ship there yet).
+      const requestedDevice = settings.whisper.device;
+      const device =
+        process.platform === 'win32' && requestedDevice === 'auto' ? 'cpu' : requestedDevice;
       const transcript = await service.transcribe(audioPath, {
         model: settings.whisper.model,
         language: settings.whisper.language,
+        device,
       });
       const transcriptPath = `${audioPath}.transcript.json`;
       await fsPromises.writeFile(transcriptPath, JSON.stringify(transcript, null, 2), 'utf8');
