@@ -15,7 +15,13 @@ from typing import Any, Callable
 
 import requests
 from huggingface_hub import hf_hub_url
-from llama_cpp import Llama
+
+# `from llama_cpp import Llama` is deliberately deferred to `_ensure_loaded`.
+# Top-level imports of the llama-cpp Python extension run the native init
+# path immediately, and CUDA-enabled builds (whl/cu124 etc.) crash the
+# interpreter when no NVIDIA driver is present — which kills the whole
+# sidecar on first launch and takes Whisper / face tracking down with it.
+# Importing lazily means the failure is contained to the first chat() call.
 
 # Emit a progress event every ~1MB downloaded. Smaller = smoother UI but more
 # IPC noise; 1MB on a 2.5GB file ≈ 2500 events over a multi-minute download.
@@ -125,6 +131,9 @@ class LlmEngine:
         raise ValueError(f"unknown schema_id: {schema_id!r}")
 
     def _ensure_loaded(self, model_path: str) -> Any:
+        # Lazy import — see module-level comment for why this can't live at top.
+        from llama_cpp import Llama  # noqa: PLC0415
+
         if self._loaded_model is None or self._loaded_model_path != model_path:
             if self._loaded_model is not None:
                 # Release reference so GC + llama-cpp can free GPU memory.

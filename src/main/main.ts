@@ -286,17 +286,17 @@ function getResumeService(): ResumeService {
 function getSetupWizard(): SetupWizardService {
   if (setupWizard) return setupWizard;
   const paths = resolveRuntimePaths();
-  // llama-cpp-python publishes platform-specific wheels at separate indexes:
-  //   - Windows: ../whl/cu124 — CUDA-enabled build, runs on GPU when the
-  //     NVIDIA stack we also bundle (nvidia-cublas-cu12, nvidia-cudnn-cu12,
-  //     nvidia-cuda-runtime-cu12) is present; falls back to CPU otherwise.
-  //   - macOS / Linux: ../whl/cpu — CPU-only build, no GPU acceleration.
-  // We can't put this URL in requirements.txt because uv doesn't honor env
-  // markers on --extra-index-url there, so we pass it via the wizard.
-  const llmWheelIndex =
-    process.platform === 'win32'
-      ? 'https://abetlen.github.io/llama-cpp-python/whl/cu124'
-      : 'https://abetlen.github.io/llama-cpp-python/whl/cpu';
+  // llama-cpp-python's whl/cu124 wheel does NOT fall back to CPU cleanly —
+  // when the .pyd loads, it eagerly probes the NVIDIA driver, and on a
+  // machine without one the very `from llama_cpp import Llama` (top-level
+  // in llm_engine.py) crashes the sidecar with exit code 1 before STT can
+  // even run. Until we add a first-launch GPU-detect step that conditionally
+  // picks cu124 vs cpu, pin the CPU build on every platform. Whisper GPU
+  // (via faster-whisper + ctranslate2) is separately gated by the user's
+  // settings.whisper.device choice and the NVIDIA bundle in requirements.txt,
+  // so this rollback doesn't affect it. LLM GPU acceleration is deferred to
+  // a future milestone.
+  const llmWheelIndex = 'https://abetlen.github.io/llama-cpp-python/whl/cpu';
   setupWizard = new SetupWizardService({
     uvBinary: paths.uvBinary,
     pythonRuntime: paths.pythonRuntime,
