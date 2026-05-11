@@ -15,18 +15,33 @@ const MIN_CUE_DURATION_SEC = 0.3;
 const PLAY_RES_X = 1080;
 const PLAY_RES_Y = 1920;
 const OUTLINE_WIDTH = 3;
-const MARGIN_V = 200;
+/** Default style baseline distance from frame bottom, in 1920-canvas px.
+ *  120 places the bottom-aligned subtitle inside the 240px bottom bar. */
+const MARGIN_V = 120;
+/** Title style baseline distance from frame top, in 1920-canvas px.
+ *  140 places the top-aligned title near the vertical center of the 240px top bar. */
+const TITLE_MARGIN_V = 140;
+const TITLE_FONT_SIZE = 64;
 
 /**
- * Build a complete .ass file content string (libass-compatible) from a list
- * of word-timed transcript entries. Filters to the clip window, groups into
- * 2-word cues, rebases timestamps clip-relative, and emits one Dialogue line
- * per cue. Returns an empty string when no words fall in the window so the
- * caller can skip writing the file + appending the subtitles filter.
+ * Build a complete .ass file content string (libass-compatible). Always
+ * non-empty: emits a `Title` style + a full-clip-duration Dialogue line
+ * carrying `titleText` (rendered in the 240px top bar), and a `Default`
+ * style + per-cue word-level subtitles (rendered in the 240px bottom bar)
+ * when `words` contains entries inside `[clipStartSec, clipEndSec]`.
+ *
+ * Word cues group into 2-word chunks, rebase timestamps clip-relative, and
+ * are clamped to `[0, clipEndSec - clipStartSec]`. Very short stutter words
+ * are padded to `MIN_CUE_DURATION_SEC` for readability.
  */
-export function buildAssFile(words: Word[], clipStartSec: number, clipEndSec: number, style: SubtitleStyle): string {
+export function buildAssFile(
+  words: Word[],
+  clipStartSec: number,
+  clipEndSec: number,
+  style: SubtitleStyle,
+  titleText: string,
+): string {
   const inWindow = words.filter((w) => w.start < clipEndSec && w.end > clipStartSec);
-  if (inWindow.length === 0) return '';
 
   const cues: { startSec: number; endSec: number; text: string }[] = [];
   for (let i = 0; i < inWindow.length; i += WORDS_PER_CUE) {
@@ -55,16 +70,21 @@ export function buildAssFile(words: Word[], clipStartSec: number, clipEndSec: nu
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BorderStyle, Outline, Alignment, MarginV, Encoding',
     `Style: Default,${style.fontFamily},${style.fontSize},${fillAss},${outlineAss},1,${OUTLINE_WIDTH},${alignment},${MARGIN_V},1`,
+    `Style: Title,${style.fontFamily},${TITLE_FONT_SIZE},&H00FFFFFF,&H00000000,1,0,8,${TITLE_MARGIN_V},1`,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Text',
   ].join('\n');
 
-  const dialogues = cues
+  const clipDurationSec = Math.max(0, clipEndSec - clipStartSec);
+  const titleDialogue = `Dialogue: 0,${formatAssTime(0)},${formatAssTime(clipDurationSec)},Title,${escapeAssText(titleText)}`;
+
+  const subtitleDialogues = cues
     .map((c) => `Dialogue: 0,${formatAssTime(c.startSec)},${formatAssTime(c.endSec)},Default,${c.text}`)
     .join('\n');
 
-  return `${header}\n${dialogues}\n`;
+  const body = subtitleDialogues.length > 0 ? `${titleDialogue}\n${subtitleDialogues}` : titleDialogue;
+  return `${header}\n${body}\n`;
 }
 
 /**
