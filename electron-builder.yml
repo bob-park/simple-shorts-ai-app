@@ -51,10 +51,23 @@ win:
 nsis:
   oneClick: false                        # show install wizard, let user pick install dir
   perMachine: false                      # install into %LOCALAPPDATA% (no admin prompt)
+  # perMachine: false + allowElevation: true (the default) is electron-builder's
+  # "mixed mode" — the wizard asks the user "current user / all users". When the
+  # user picks "all users", install lands in Program Files and uninstall needs
+  # admin elevation, which is handed off via the bundled elevate.exe helper.
+  # That handoff is fragile (often fails silently with no UI), so users report
+  # "uninstall doesn't work". Forcing allowElevation: false removes the choice
+  # entirely and pins every install to %LOCALAPPDATA% — uninstall then runs as
+  # a regular user with no elevation, which works reliably.
+  allowElevation: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Shorts AI
+  # NSIS only tracks files it installed, so the sidecar-venv the wizard creates
+  # at runtime under %APPDATA% would otherwise leak across uninstalls. This
+  # flag tells the uninstaller to wipe %APPDATA%\<appId>\ too.
+  deleteAppDataOnUninstall: true
 
 # ${os} → 'mac' | 'win' | 'linux'; ${arch} → 'arm64' | 'x64'.
 # python-runtime, requirements.txt, and sidecar-src are shared across platforms
