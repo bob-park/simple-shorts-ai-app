@@ -1,4 +1,6 @@
 import type { Word } from '@shared/transcript';
+import type { TitleFontWeight } from '@shared/settings';
+import { SHORT_LAYOUT } from '@shared/shortLayout';
 
 export interface SubtitleStyle {
   fontFamily: string;
@@ -8,6 +10,11 @@ export interface SubtitleStyle {
   /** `#RRGGBB`. */
   outlineColor: string;
   position: 'bottom' | 'middle';
+  /** Title text size, in libass-canvas px (1080×1920). */
+  titleFontSize: number;
+  /** CSS-like numeric weight ('400'–'900') written into the Title ASS style Bold field;
+   *  libass matches the closest available font weight. */
+  titleFontWeight: TitleFontWeight;
 }
 
 const WORDS_PER_CUE = 2;
@@ -15,15 +22,16 @@ const MIN_CUE_DURATION_SEC = 0.3;
 const PLAY_RES_X = 1080;
 const PLAY_RES_Y = 1920;
 const OUTLINE_WIDTH = 3;
-/** Default style baseline distance from frame bottom, in 1920-canvas px.
- *  120 places the bottom-aligned subtitle inside the 240px bottom bar. */
-const MARGIN_V = 120;
-/** Title style baseline distance from frame top, in 1920-canvas px.
- *  140 places the top-aligned title near the vertical center of the 240px top bar. */
-const TITLE_MARGIN_V = 140;
-/** Title text size, in libass-canvas px. Matched to Default fontsize so
- *  the bar visually carries the same weight as the word subtitle line. */
-const TITLE_FONT_SIZE = 64;
+
+/** Compute MarginV that vertically centers a single text line of size `fontSize`
+ *  inside a bar of height `barHeight`. libass interprets MarginV as the distance
+ *  from the screen edge (top for Alignment=8, bottom for Alignment=2) to the
+ *  edge of the text bounding box, so `(barHeight - fontSize) / 2` puts the
+ *  text's center on the bar's center. Clamped to 0 to avoid negatives when a
+ *  user pushes the font size past the bar height. */
+function centeredMarginV(barHeight: number, fontSize: number): number {
+  return Math.max(0, Math.round((barHeight - fontSize) / 2));
+}
 
 /**
  * Fallback style used when the caller of `buildAssFile` doesn't supply
@@ -37,13 +45,15 @@ export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = {
   fillColor: '#FFFFFF',
   outlineColor: '#000000',
   position: 'bottom',
+  titleFontSize: 72,
+  titleFontWeight: '700',
 };
 
 /**
  * Build a complete .ass file content string (libass-compatible). Always
  * non-empty: emits a `Title` style + a full-clip-duration Dialogue line
- * carrying `titleText` (rendered in the 240px top bar), and a `Default`
- * style + per-cue word-level subtitles (rendered in the 240px bottom bar)
+ * carrying `titleText` (rendered in the top black bar), and a `Default`
+ * style + per-cue word-level subtitles (rendered in the bottom black bar)
  * when `words` contains entries inside `[clipStartSec, clipEndSec]`.
  *
  * Word cues group into 2-word chunks, rebase timestamps clip-relative, and
@@ -75,6 +85,14 @@ export function buildAssFile(
   const alignment = style.position === 'middle' ? 5 : 2;
   const fillAss = hexToAssColor(style.fillColor);
   const outlineAss = hexToAssColor(style.outlineColor);
+  // Vertically center text inside the matching black bar. For Alignment=2
+  // (bottom-anchored), MarginV is measured from the screen bottom up; for
+  // Alignment=8 (top-anchored), from the screen top down. `position='middle'`
+  // uses Alignment=5 (canvas center) and ignores MarginV — we emit 0.
+  const defaultMarginV = style.position === 'middle'
+    ? 0
+    : centeredMarginV(SHORT_LAYOUT.bottomBarHeight, style.fontSize);
+  const titleMarginV = centeredMarginV(SHORT_LAYOUT.topBarHeight, style.titleFontSize);
 
   const header = [
     '[Script Info]',
@@ -84,13 +102,14 @@ export function buildAssFile(
     'WrapStyle: 2',
     '',
     '[V4+ Styles]',
-    'Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BorderStyle, Outline, Alignment, MarginV, Encoding',
-    `Style: Default,${style.fontFamily},${style.fontSize},${fillAss},${outlineAss},1,${OUTLINE_WIDTH},${alignment},${MARGIN_V},1`,
+    'Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, Bold, BorderStyle, Outline, Alignment, MarginV, Encoding',
+    `Style: Default,${style.fontFamily},${style.fontSize},${fillAss},${outlineAss},0,1,${OUTLINE_WIDTH},${alignment},${defaultMarginV},1`,
     // Title row colors are pinned (white-on-black). The user-configurable
     // fillColor / outlineColor only apply to word subtitles, which sit on
     // the (also-black) bottom bar. Outline=0 since text is already on solid
-    // black; Alignment=8 means top-center (libass numpad layout).
-    `Style: Title,${style.fontFamily},${TITLE_FONT_SIZE},&H00FFFFFF,&H00000000,1,0,8,${TITLE_MARGIN_V},1`,
+    // black; Alignment=8 means top-center (libass numpad layout). Bold is a
+    // CSS-like numeric weight (400-900) so libass picks the closest face.
+    `Style: Title,${style.fontFamily},${style.titleFontSize},&H00FFFFFF,&H00000000,${style.titleFontWeight},1,0,8,${titleMarginV},1`,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Text',

@@ -9,6 +9,8 @@ const STYLE = {
   fillColor: '#FFFFFF',
   outlineColor: '#000000',
   position: 'bottom' as const,
+  titleFontSize: 72,
+  titleFontWeight: '700' as const,
 };
 
 function w(text: string, start: number, end: number): Word {
@@ -103,9 +105,9 @@ describe('buildAssFile', () => {
     const result = buildAssFile(words, 0, 5, { ...STYLE, position: 'bottom' }, 'TestTitle');
     const styleLine = result.split('\n').find((l) => l.startsWith('Style: Default,'))!;
     // Format row order: Name, Fontname, Fontsize, PrimaryColour, OutlineColour,
-    // BorderStyle, Outline, Alignment, MarginV, Encoding → Alignment is column 8 (index 7).
+    // Bold, BorderStyle, Outline, Alignment, MarginV, Encoding → Alignment is column 9 (index 8).
     const cols = styleLine.replace(/^Style:\s*/, '').split(',');
-    expect(cols[7]).toBe('2');
+    expect(cols[8]).toBe('2');
   });
 
   it('applies position=middle → ASS Alignment 5', () => {
@@ -113,34 +115,52 @@ describe('buildAssFile', () => {
     const result = buildAssFile(words, 0, 5, { ...STYLE, position: 'middle' }, 'TestTitle');
     const styleLine = result.split('\n').find((l) => l.startsWith('Style: Default,'))!;
     const cols = styleLine.replace(/^Style:\s*/, '').split(',');
-    expect(cols[7]).toBe('5');
+    expect(cols[8]).toBe('5');
   });
 
-  it('places Default style baseline inside the bottom bar (MarginV=120)', () => {
+  it('vertically centers the Default subtitle in the 320px bottom bar', () => {
     const words = [w('hi', 0, 0.5)];
     const result = buildAssFile(words, 0, 5, STYLE, 'TestTitle');
     const defaultLine = result.split('\n').find((l) => l.startsWith('Style: Default,'))!;
     const cols = defaultLine.replace(/^Style:\s*/, '').split(',');
-    // Format row: Name,Fontname,Fontsize,PrimaryColour,OutlineColour,BorderStyle,Outline,Alignment,MarginV,Encoding
-    // MarginV is column 9 (index 8). Changed from 200 → 120 to land inside the 240px bottom bar.
-    expect(cols[8]).toBe('120');
+    // Format row: Name,Fontname,Fontsize,PrimaryColour,OutlineColour,Bold,BorderStyle,Outline,Alignment,MarginV,Encoding
+    // Default word style is never bold (col 5 = 0). With fontSize=64 and a 320px
+    // bottom bar, MarginV = (320 - 64) / 2 = 128 centers the subtitle in the bar.
+    expect(cols[5]).toBe('0');
+    expect(cols[9]).toBe('128');
   });
 
-  it('emits a Title style row aligned to top-center with MarginV=140 and no outline', () => {
+  it('forces MarginV=0 for the Default style when position=middle (Alignment=5 = canvas center)', () => {
+    const result = buildAssFile([w('hi', 0, 0.5)], 0, 5, { ...STYLE, position: 'middle' }, 'TestTitle');
+    const defaultLine = result.split('\n').find((l) => l.startsWith('Style: Default,'))!;
+    const cols = defaultLine.replace(/^Style:\s*/, '').split(',');
+    expect(cols[8]).toBe('5');
+    expect(cols[9]).toBe('0');
+  });
+
+  it('emits a Title style row with configured size + weight, vertically centered in the 320px top bar', () => {
     const result = buildAssFile([], 0, 30, STYLE, 'TestTitle');
     const titleLine = result.split('\n').find((l) => l.startsWith('Style: Title,'))!;
     const cols = titleLine.replace(/^Style:\s*/, '').split(',');
-    // Format row order is the same as Default.
-    // Name=Title, Fontname=Pretendard (from STYLE.fontFamily), Fontsize=64,
-    // PrimaryColour=&H00FFFFFF (white), OutlineColour=&H00000000,
-    // BorderStyle=1, Outline=0, Alignment=8 (top-center), MarginV=140.
+    // Format: Name,Fontname,Fontsize,PrimaryColour,OutlineColour,Bold,BorderStyle,Outline,Alignment,MarginV,Encoding
     expect(cols[0]).toBe('Title');
     expect(cols[1]).toBe('Pretendard');
-    expect(cols[2]).toBe('64');
+    expect(cols[2]).toBe('72'); // STYLE.titleFontSize
     expect(cols[3]).toBe('&H00FFFFFF');
-    expect(cols[6]).toBe('0'); // outline width 0
-    expect(cols[7]).toBe('8'); // top-center alignment
-    expect(cols[8]).toBe('140');
+    expect(cols[5]).toBe('700'); // STYLE.titleFontWeight (numeric Bold)
+    expect(cols[7]).toBe('0'); // Outline width 0 (title sits on solid black bar)
+    expect(cols[8]).toBe('8'); // top-center alignment
+    // (320 - 72) / 2 = 124 centers the title in the top bar.
+    expect(cols[9]).toBe('124');
+  });
+
+  it('propagates a different title font size + weight from style into the Title style row', () => {
+    const customStyle = { ...STYLE, titleFontSize: 96, titleFontWeight: '900' as const };
+    const result = buildAssFile([], 0, 30, customStyle, 'TestTitle');
+    const titleLine = result.split('\n').find((l) => l.startsWith('Style: Title,'))!;
+    const cols = titleLine.replace(/^Style:\s*/, '').split(',');
+    expect(cols[2]).toBe('96');
+    expect(cols[5]).toBe('900');
   });
 
   it('clamps cue end to clip end when a word straddles the boundary', () => {

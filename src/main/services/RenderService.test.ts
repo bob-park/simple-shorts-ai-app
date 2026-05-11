@@ -82,7 +82,7 @@ describe('RenderService', () => {
     expect(result.results[1]!.outputPath).toBe('/tmp/out/short_2.mp4');
   });
 
-  it('builds ffmpeg args with select cuts, the 3:4 crop + 1080×1440 scale + 1080×1920 pad filter chain, libx264, and aac', async () => {
+  it('builds ffmpeg args with select cuts, the 3:4 crop + 1080×1280 scale + 1080×1920 pad filter chain, libx264, and aac', async () => {
     const h = fakeRunHandle();
     run.mockReturnValue(h);
     const promise = service.render({
@@ -103,7 +103,7 @@ describe('RenderService', () => {
     expect(args[args.indexOf('-i') + 1]).toBe('/tmp/in.mp4');
     expect(args).toContain('-vf');
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,5,35)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,5,35)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
     expect(args).toContain('-af');
     expect(args[args.indexOf('-af') + 1]).toBe("aselect='between(t,5,35)',asetpts=N/SR/TB");
@@ -254,7 +254,7 @@ describe('RenderService with tracker', () => {
     const vfIndex = args.indexOf('-vf');
     expect(vfIndex).toBeGreaterThan(-1);
     expect(args[vfIndex + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,sendcmd=f=/tmp/out/short_1.cmd,crop@c=ih*3/4:ih:0:0,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,sendcmd=f=/tmp/out/short_1.cmd,crop@c=ih*3/4:ih:0:0,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
 
     // RenderClipResult.tracking populated
@@ -287,7 +287,7 @@ describe('RenderService with tracker', () => {
     // Args use the static center crop with select filter
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
     expect(result.results[0]!.tracking).toBeNull();
     expect(result.results[0]!.status).toBe('done');
@@ -319,7 +319,7 @@ describe('RenderService with tracker', () => {
     expect(writePaths).toContain('/tmp/out/short_1.ass');
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
     expect(result.results[0]!.tracking).toBeNull();
     expect(result.results[0]!.status).toBe('done');
@@ -354,7 +354,7 @@ describe('RenderService with tracker', () => {
     expect(writePaths).toContain('/tmp/out/short_1.ass');
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
     expect(result.results[0]!.tracking).toBeNull();
     expect(result.results[0]!.status).toBe('done');
@@ -367,6 +367,8 @@ const SUBTITLE_OPTS = {
   fillColor: '#FFFFFF',
   outlineColor: '#000000',
   position: 'bottom' as const,
+  titleFontSize: 72,
+  titleFontWeight: '700' as const,
 };
 
 function fakeWords(specs: { text: string; start: number; end: number }[]) {
@@ -413,7 +415,7 @@ describe('RenderService with subtitles', () => {
     const args: string[] = run.mock.calls[0]![0].args;
     const vfIndex = args.indexOf('-vf');
     expect(args[vfIndex + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
 
     // RenderClipResult.subtitles populated
@@ -446,7 +448,7 @@ describe('RenderService with subtitles', () => {
 
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
     // RenderClipResult.subtitles → null because no word cues were emitted.
     expect(result.results[0]!.subtitles).toBeNull();
@@ -477,7 +479,7 @@ describe('RenderService with subtitles', () => {
 
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,100,130)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,100,130)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
     expect(result.results[0]!.subtitles).toBeNull();
   });
@@ -539,12 +541,12 @@ describe('RenderService with subtitles', () => {
     // Clip 1 retry args have NO subtitles filter
     const retryArgs: string[] = run.mock.calls[1]![0].args;
     expect(retryArgs[retryArgs.indexOf('-vf') + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black",
     );
     // Clip 2 args also have NO subtitles filter (service flag set after first failure)
     const clip2Args: string[] = run.mock.calls[2]![0].args;
     expect(clip2Args[clip2Args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,60,90)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black",
+      "select='between(t,60,90)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black",
     );
     // Both clips end up done with subtitles: null
     expect(result.results[0]!.status).toBe('done');
@@ -581,7 +583,7 @@ describe('RenderService with subtitles', () => {
 
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,5,8)+between(t,12,15)+between(t,30,33)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1440,pad=1080:1920:0:240:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,5,8)+between(t,12,15)+between(t,30,33)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
     expect(args[args.indexOf('-af') + 1]).toBe(
       "aselect='between(t,5,8)+between(t,12,15)+between(t,30,33)',asetpts=N/SR/TB",

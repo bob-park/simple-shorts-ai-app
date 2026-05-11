@@ -1,4 +1,4 @@
-import type { Settings, SubtitlePosition } from '@shared/settings';
+import type { Settings, SubtitlePosition, TitleFontWeight } from '@shared/settings';
 
 import { SettingsCard } from './SettingsCard';
 import { SettingsRow } from './SettingsRow';
@@ -9,6 +9,15 @@ const INPUT_CLASS =
 const POSITIONS: { value: SubtitlePosition; label: string }[] = [
   { value: 'bottom', label: '하단' },
   { value: 'middle', label: '중앙' },
+];
+
+const TITLE_FONT_WEIGHTS: { value: TitleFontWeight; label: string }[] = [
+  { value: '400', label: '400 · Regular' },
+  { value: '500', label: '500 · Medium' },
+  { value: '600', label: '600 · Semibold' },
+  { value: '700', label: '700 · Bold' },
+  { value: '800', label: '800 · Extrabold' },
+  { value: '900', label: '900 · Black' },
 ];
 
 export function SubtitlesSection({
@@ -73,6 +82,31 @@ export function SubtitlesSection({
           {POSITIONS.map((p) => (
             <option key={p.value} value={p.value}>
               {p.label}
+            </option>
+          ))}
+        </select>
+      </SettingsRow>
+      <SettingsRow label="제목 폰트 크기 (px, 1080×1920 기준)">
+        <input
+          type="number"
+          className={INPUT_CLASS}
+          min={32}
+          max={120}
+          value={subtitles.titleFontSize}
+          onChange={(e) => onChange({ ...subtitles, titleFontSize: Number(e.target.value) })}
+        />
+      </SettingsRow>
+      <SettingsRow label="제목 폰트 굵기">
+        <select
+          className={INPUT_CLASS}
+          value={subtitles.titleFontWeight}
+          onChange={(e) =>
+            onChange({ ...subtitles, titleFontWeight: e.target.value as TitleFontWeight })
+          }
+        >
+          {TITLE_FONT_WEIGHTS.map((w) => (
+            <option key={w.value} value={w.value}>
+              {w.label}
             </option>
           ))}
         </select>
