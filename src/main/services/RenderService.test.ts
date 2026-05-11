@@ -1,6 +1,38 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { RenderService } from './RenderService';
+import { RenderService, ffmpegFilterValue } from './RenderService';
+
+describe('ffmpegFilterValue', () => {
+  it('wraps a plain POSIX path in single quotes (no metacharacters to escape)', () => {
+    expect(ffmpegFilterValue('/tmp/out/short_1.cmd')).toBe("'/tmp/out/short_1.cmd'");
+  });
+
+  it('preserves spaces inside the value — single-quoting handles them as literals', () => {
+    expect(ffmpegFilterValue('/Users/Bob Smith/Movies/short_1.ass')).toBe(
+      "'/Users/Bob Smith/Movies/short_1.ass'",
+    );
+  });
+
+  it('doubles backslashes so ffmpeg sees the raw path on Windows', () => {
+    // Input: C:\Users\hwpark\short_1.cmd  (literal backslashes from the OS path layer)
+    // Output: 'C:\\Users\\hwpark\\short_1.cmd' (ffmpeg level-1 escape inside single quotes)
+    expect(ffmpegFilterValue('C:\\Users\\hwpark\\short_1.cmd')).toBe(
+      "'C:\\\\Users\\\\hwpark\\\\short_1.cmd'",
+    );
+  });
+
+  it('escapes embedded single quotes so they do not close the wrapper', () => {
+    expect(ffmpegFilterValue("/tmp/it's a file.ass")).toBe("'/tmp/it\\'s a file.ass'");
+  });
+
+  it('survives drive-letter colon — the value stays inside single quotes', () => {
+    // The drive-letter colon is the actual bug surface on Windows: outside
+    // single quotes, ffmpeg reads `f=C` and starts parsing the next option.
+    const out = ffmpegFilterValue('C:\\foo');
+    expect(out.startsWith("'C:")).toBe(true);
+    expect(out.endsWith("'")).toBe(true);
+  });
+});
 
 function fakeHighlight(i: number, start: number, end: number) {
   return {
@@ -254,7 +286,7 @@ describe('RenderService with tracker', () => {
     const vfIndex = args.indexOf('-vf');
     expect(vfIndex).toBeGreaterThan(-1);
     expect(args[vfIndex + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,sendcmd=f=/tmp/out/short_1.cmd,crop@c=ih*3/4:ih:0:0,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,sendcmd=f='/tmp/out/short_1.cmd',crop@c=ih*3/4:ih:0:0,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
     );
 
     // RenderClipResult.tracking populated
