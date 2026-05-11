@@ -281,7 +281,11 @@ function getRenderService(): RenderService {
   const paths = resolveRuntimePaths();
   ffmpegRunner = new FfmpegRunner({
     spawn,
-    command: app.isPackaged && existsSync(paths.ffmpegBinary) ? paths.ffmpegBinary : 'ffmpeg',
+    // existsSync filters out the 'ffmpeg' PATH-name string (which is not an
+    // absolute path) and keeps the bundled libass-enabled binary when present
+    // — required in BOTH dev and packaged mode because Homebrew's ffmpeg is
+    // built without --enable-libass and would silently drop `subtitles=`.
+    command: existsSync(paths.ffmpegBinary) ? paths.ffmpegBinary : 'ffmpeg',
   });
   // Tracking goes through the same Python sidecar that owns transcribe (lazy
   // boot on first call). Reuse the existing PythonSidecar instance if it's
@@ -316,7 +320,11 @@ function getHistoryService(): HistoryService {
     const paths = resolveRuntimePaths();
     ffmpegRunner = new FfmpegRunner({
       spawn,
-      command: app.isPackaged && existsSync(paths.ffmpegBinary) ? paths.ffmpegBinary : 'ffmpeg',
+      // existsSync filters out the 'ffmpeg' PATH-name string (which is not an
+    // absolute path) and keeps the bundled libass-enabled binary when present
+    // — required in BOTH dev and packaged mode because Homebrew's ffmpeg is
+    // built without --enable-libass and would silently drop `subtitles=`.
+    command: existsSync(paths.ffmpegBinary) ? paths.ffmpegBinary : 'ffmpeg',
     });
   }
   const thumbnails = new ThumbnailService(ffmpegRunner);
@@ -653,6 +661,8 @@ void app.whenReady().then(() => {
                 fillColor: settings.subtitles.fillColor,
                 outlineColor: settings.subtitles.outlineColor,
                 position: settings.subtitles.position,
+                titleFontSize: settings.subtitles.titleFontSize,
+                titleFontWeight: settings.subtitles.titleFontWeight,
               }
             : undefined,
       });
