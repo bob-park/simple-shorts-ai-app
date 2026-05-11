@@ -56,7 +56,7 @@ export function resolveRuntimePaths(ctx: ResolveRuntimePathsContext): RuntimePat
   // Dev mode — same logic as before, but build-resources path is now
   // <platform>-<arch>-keyed (mac-arm64) instead of <arch> alone (arm64).
   // See electron-builder.yml extraResources for the matching pattern.
-  const targetDir = `mac-${ctx.arch}`;
+  const targetDir = `${ctx.platform === 'win32' ? 'win' : 'mac'}-${ctx.arch}`;
   const bundledFfmpeg = join(ctx.repoRoot, 'build-resources', targetDir, 'ffmpeg');
   const ffmpegBinary = ctx.fileExists(bundledFfmpeg) ? bundledFfmpeg : 'ffmpeg';
   return {

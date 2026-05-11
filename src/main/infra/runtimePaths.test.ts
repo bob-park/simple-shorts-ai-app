@@ -30,6 +30,8 @@ describe('resolveRuntimePaths', () => {
     expect(r.pythonRuntime).toBe(join(MAC_PACKAGED_CTX.resourcesPath, 'python-runtime', 'bin', 'python3.11'));
     expect(r.ffmpegBinary).toBe(join(MAC_PACKAGED_CTX.resourcesPath, 'ffmpeg'));
     expect(r.ytdlpBinary).toBe(join(MAC_PACKAGED_CTX.resourcesPath, 'yt-dlp'));
+    expect(r.requirementsPath).toBe(join(MAC_PACKAGED_CTX.resourcesPath, 'requirements.txt'));
+    expect(r.sidecarCwd).toBe(MAC_PACKAGED_CTX.resourcesPath);
     expect(r.venvPath).toBe(join(MAC_PACKAGED_CTX.userDataPath, 'sidecar-venv'));
     expect(r.sidecarSpawn.command).toBe(join(MAC_PACKAGED_CTX.userDataPath, 'sidecar-venv', 'bin', 'python'));
     expect(r.sidecarSpawn.args).toEqual(['-m', 'shorts_sidecar']);
