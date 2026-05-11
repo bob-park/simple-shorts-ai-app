@@ -1,8 +1,8 @@
 #!/usr/bin/env tsx
 /**
- * Pre-package script: downloads python-build-standalone, uv, and ffmpeg
- * for both arm64 and x64 macOS, verifies SHA-256, and unpacks into
- * build-resources/<arch>/<tool>/ for electron-builder to pick up.
+ * Pre-package script: downloads python-build-standalone, uv, ffmpeg, and yt-dlp
+ * for macOS arm64 (and in future, win-x64), verifies SHA-256, and unpacks into
+ * build-resources/<target>/<tool>/ for electron-builder to pick up.
  *
  * Cached under build-resources/.cache/ — re-runs reuse cached archives
  * if SHA matches. Run via `yarn package` (which calls `prepackage`).
@@ -19,19 +19,26 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const ROOT = resolve(__dirname, '..');
 const CACHE_DIR = join(ROOT, 'build-resources', '.cache');
 const OUT_DIR = join(ROOT, 'build-resources');
-const VERSIONS = JSON.parse(await readFile(join(ROOT, 'scripts', 'runtime-versions.json'), 'utf8')) as {
-  python: { version: string; release: string; arm64: ArchEntry; x64: ArchEntry };
-  uv: { version: string; arm64: ArchEntry; x64: ArchEntry };
-  ffmpeg: { version: string; arm64: ArchEntry; x64: ArchEntry };
-  ytdlp: { version: string; arm64: ArchEntry; x64: ArchEntry };
-};
+
+type Target = 'mac-arm64' | 'win-x64';
 
 interface ArchEntry {
   url: string;
   sha256: string;
 }
 
-type Arch = 'arm64' | 'x64';
+interface Tool {
+  version: string;
+  release?: string;            // python-only; ignored elsewhere
+  targets: Partial<Record<Target, ArchEntry>>;
+}
+
+const VERSIONS = JSON.parse(await readFile(join(ROOT, 'scripts', 'runtime-versions.json'), 'utf8')) as {
+  python: Tool;
+  uv: Tool;
+  ffmpeg: Tool;
+  ytdlp: Tool;
+};
 
 async function sha256(path: string): Promise<string> {
   const hash = createHash('sha256');
@@ -83,15 +90,15 @@ async function unpackPython(archivePath: string, destDir: string): Promise<void>
   await spawn2('tar', ['-xzf', archivePath, '-C', destDir, '--strip-components=1']);
 }
 
-async function unpackUv(archivePath: string, destFile: string, arch: Arch): Promise<void> {
+async function unpackUv(archivePath: string, destFile: string, target: Target): Promise<void> {
+  // mac-arm64 only for now; Task 5 will branch on file extension to handle the windows zip.
   if (existsSync(destFile)) rmSync(destFile);
   await mkdir(dirname(destFile), { recursive: true });
-  const extractDir = join(CACHE_DIR, `uv-extract-${arch}`);
+  const extractDir = join(CACHE_DIR, `uv-extract-${target}`);
   if (existsSync(extractDir)) rmSync(extractDir, { recursive: true, force: true });
   mkdirSync(extractDir, { recursive: true });
   await spawn2('tar', ['-xzf', archivePath, '-C', extractDir]);
-  // uv tarball contains uv-<arch>-apple-darwin/uv
-  const archDirName = arch === 'arm64' ? 'uv-aarch64-apple-darwin' : 'uv-x86_64-apple-darwin';
+  const archDirName = 'uv-aarch64-apple-darwin';  // mac-arm64 only; widened in Task 5
   await spawn2('cp', [join(extractDir, archDirName, 'uv'), destFile]);
   await spawn2('chmod', ['+x', destFile]);
 }
@@ -105,10 +112,12 @@ async function installYtdlp(srcPath: string, destFile: string): Promise<void> {
   await spawn2('chmod', ['+x', destFile]);
 }
 
-async function unpackFfmpeg(archivePath: string, destFile: string, arch: Arch): Promise<void> {
+async function unpackFfmpeg(archivePath: string, destFile: string, target: Target): Promise<void> {
+  // Same: mac-only for now; Task 5 widens. unzip the osxexperts.net archive
+  // and copy the single 'ffmpeg' binary at root.
   if (existsSync(destFile)) rmSync(destFile);
   await mkdir(dirname(destFile), { recursive: true });
-  const extractDir = join(CACHE_DIR, `ffmpeg-extract-${arch}`);
+  const extractDir = join(CACHE_DIR, `ffmpeg-extract-${target}`);
   if (existsSync(extractDir)) rmSync(extractDir, { recursive: true, force: true });
   mkdirSync(extractDir, { recursive: true });
   await spawn2('unzip', ['-q', '-o', archivePath, '-d', extractDir]);
@@ -117,34 +126,36 @@ async function unpackFfmpeg(archivePath: string, destFile: string, arch: Arch): 
   await spawn2('chmod', ['+x', destFile]);
 }
 
-async function fetchArch(arch: Arch): Promise<void> {
-  console.log(`\n=== ${arch} ===`);
-  const archDir = join(OUT_DIR, arch);
+async function fetchTarget(target: Target): Promise<void> {
+  console.log(`\n=== ${target} ===`);
+  const archDir = join(OUT_DIR, target);
 
-  const pyMeta = VERSIONS.python[arch];
-  const pyArchive = await ensureCached(pyMeta.url, pyMeta.sha256, `python-${VERSIONS.python.version}-${arch}.tar.gz`);
+  const pyMeta = VERSIONS.python.targets[target];
+  if (!pyMeta) throw new Error(`No python entry for target ${target}`);
+  const pyArchive = await ensureCached(pyMeta.url, pyMeta.sha256, `python-${VERSIONS.python.version}-${target}.tar.gz`);
   await unpackPython(pyArchive, join(archDir, 'python-runtime'));
 
-  const uvMeta = VERSIONS.uv[arch];
-  const uvArchive = await ensureCached(uvMeta.url, uvMeta.sha256, `uv-${VERSIONS.uv.version}-${arch}.tar.gz`);
-  await unpackUv(uvArchive, join(archDir, 'uv'), arch);
+  const uvMeta = VERSIONS.uv.targets[target];
+  if (!uvMeta) throw new Error(`No uv entry for target ${target}`);
+  const uvArchive = await ensureCached(uvMeta.url, uvMeta.sha256, `uv-${VERSIONS.uv.version}-${target}.tar.gz`);
+  await unpackUv(uvArchive, join(archDir, 'uv'), target);
 
-  const ffMeta = VERSIONS.ffmpeg[arch];
-  const ffArchive = await ensureCached(ffMeta.url, ffMeta.sha256, `ffmpeg-${VERSIONS.ffmpeg.version}-${arch}.zip`);
-  await unpackFfmpeg(ffArchive, join(archDir, 'ffmpeg'), arch);
+  const ffMeta = VERSIONS.ffmpeg.targets[target];
+  if (!ffMeta) throw new Error(`No ffmpeg entry for target ${target}`);
+  const ffArchive = await ensureCached(ffMeta.url, ffMeta.sha256, `ffmpeg-${VERSIONS.ffmpeg.version}-${target}.zip`);
+  await unpackFfmpeg(ffArchive, join(archDir, 'ffmpeg'), target);
 
-  const ytdlpMeta = VERSIONS.ytdlp[arch];
-  const ytdlpFile = await ensureCached(ytdlpMeta.url, ytdlpMeta.sha256, `yt-dlp-${VERSIONS.ytdlp.version}-${arch}`);
+  const ytdlpMeta = VERSIONS.ytdlp.targets[target];
+  if (!ytdlpMeta) throw new Error(`No yt-dlp entry for target ${target}`);
+  const ytdlpFile = await ensureCached(ytdlpMeta.url, ytdlpMeta.sha256, `yt-dlp-${VERSIONS.ytdlp.version}-${target}`);
   await installYtdlp(ytdlpFile, join(archDir, 'yt-dlp'));
 
-  console.log(`  ✓ ${arch} ready at ${archDir}`);
+  console.log(`  ✓ ${target} ready at ${archDir}`);
 }
 
 async function main(): Promise<void> {
   await mkdir(CACHE_DIR, { recursive: true });
-  // Apple Silicon only — see electron-builder.yml. To re-enable Intel,
-  // also re-add x64 to mac.target.arch and call fetchArch('x64') here.
-  await fetchArch('arm64');
+  await fetchTarget('mac-arm64');  // Task 3 generalises this via --target
   console.log('\nAll runtime artifacts ready under build-resources/');
 }
 
