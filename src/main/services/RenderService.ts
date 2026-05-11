@@ -285,19 +285,24 @@ const PAD_EXPR = `pad=${SHORT_LAYOUT.outputWidth}:${SHORT_LAYOUT.outputHeight}:0
 
 /**
  * Format a filter option value so ffmpeg's filter graph parser passes it as
- * a literal string, regardless of which metacharacters it contains. Wrap in
- * single quotes (level-1 quoting), then escape the only chars special INSIDE
- * single quotes — `\` and `'`. This survives both filter-graph (`,` `;` `[`
- * `]`) and filter-option (`:`) metacharacters, which is mandatory on Windows
- * where every absolute path contains `:` (drive-letter colon) and `\` (path
- * separator); without this the parser dies at `sendcmd=f=C:\...,` because it
- * reads `C` as the value of `f` and starts parsing the next option at `\`.
+ * a literal string. The pragmatic recipe for Windows paths:
+ *
+ *   1. Replace `\` with `/` first. Windows file APIs accept either separator,
+ *      so the path is semantically identical, but the ffmpeg filter parser
+ *      no longer has to apply backslash-escape rules — those rules vary
+ *      between ffmpeg builds (the BtbN Windows n7.1.4 wheel we ship does
+ *      NOT accept the documented `\\` → `\` decoding inside single quotes
+ *      that the macOS / Linux builds do, even though the docs say it should).
+ *   2. Wrap in single quotes. This lets the value contain `:` (drive-letter
+ *      colon), spaces, commas, brackets, etc. as literals — the only special
+ *      char inside single quotes is `'` itself, which we escape as `\'`.
  *
  * Exported for unit testing — the platform-dependent `path.join` in callers
  * makes integration assertions with backslashes awkward on a POSIX test host.
  */
 export function ffmpegFilterValue(arg: string): string {
-  return `'${arg.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+  const normalized = arg.replace(/\\/g, '/');
+  return `'${normalized.replace(/'/g, "\\'")}'`;
 }
 
 function buildVfChain(segments: HighlightSegment[], cropClause: string): string {

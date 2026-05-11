@@ -127,6 +127,41 @@ describe('SetupWizardService.run', () => {
     );
   });
 
+  it('inserts --extra-index-url flags from opts.extraIndexUrls into the uv pip install argv', async () => {
+    const { spawn, children } = makeSpawn();
+    const svc = new SetupWizardService({
+      ...opts,
+      extraIndexUrls: [
+        'https://abetlen.github.io/llama-cpp-python/whl/cu124',
+        'https://example.com/extra',
+      ],
+      spawn,
+      fs: { access: vi.fn(async () => undefined) },
+    } as never);
+    const promise = svc.run();
+    setImmediate(() => children[0]!.emit('exit', 0));
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => children[1]!.emit('exit', 0));
+    await promise;
+    expect(spawn).toHaveBeenNthCalledWith(
+      2,
+      '/r/uv',
+      [
+        'pip',
+        'install',
+        '--extra-index-url',
+        'https://abetlen.github.io/llama-cpp-python/whl/cu124',
+        '--extra-index-url',
+        'https://example.com/extra',
+        '--python',
+        '/data/sidecar-venv/bin/python',
+        '-r',
+        '/r/requirements.txt',
+      ],
+      expect.anything(),
+    );
+  });
+
   it('rejects with stderr tail when uv venv fails', async () => {
     const { spawn, children } = makeSpawn();
     const svc = new SetupWizardService({

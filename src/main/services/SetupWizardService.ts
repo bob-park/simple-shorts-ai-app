@@ -19,6 +19,15 @@ export interface SetupWizardOptions {
    */
   venvPythonBinary: string;
   requirementsPath: string;
+  /**
+   * Additional package indexes passed to `uv pip install --extra-index-url`.
+   * Caller-provided per platform — Windows wants the CUDA-enabled
+   * llama-cpp-python build at https://abetlen.github.io/llama-cpp-python/whl/cu124
+   * while macOS wants the CPU build at .../whl/cpu. We can't declare these
+   * inside requirements.txt because uv doesn't honor env markers on the
+   * `--extra-index-url` directive there.
+   */
+  extraIndexUrls?: readonly string[];
   spawn: SpawnLike;
   fs: FsLike;
 }
@@ -60,9 +69,21 @@ export class SetupWizardService {
       'venv',
     );
     this.emit({ phase: 'venv', pct: 1 });
+    const extraIndexArgs = (this.opts.extraIndexUrls ?? []).flatMap((url) => [
+      '--extra-index-url',
+      url,
+    ]);
     await this.spawnAndWait(
       this.opts.uvBinary,
-      ['pip', 'install', '--python', this.opts.venvPythonBinary, '-r', this.opts.requirementsPath],
+      [
+        'pip',
+        'install',
+        ...extraIndexArgs,
+        '--python',
+        this.opts.venvPythonBinary,
+        '-r',
+        this.opts.requirementsPath,
+      ],
       'pip',
     );
   }

@@ -286,12 +286,24 @@ function getResumeService(): ResumeService {
 function getSetupWizard(): SetupWizardService {
   if (setupWizard) return setupWizard;
   const paths = resolveRuntimePaths();
+  // llama-cpp-python publishes platform-specific wheels at separate indexes:
+  //   - Windows: ../whl/cu124 — CUDA-enabled build, runs on GPU when the
+  //     NVIDIA stack we also bundle (nvidia-cublas-cu12, nvidia-cudnn-cu12,
+  //     nvidia-cuda-runtime-cu12) is present; falls back to CPU otherwise.
+  //   - macOS / Linux: ../whl/cpu — CPU-only build, no GPU acceleration.
+  // We can't put this URL in requirements.txt because uv doesn't honor env
+  // markers on --extra-index-url there, so we pass it via the wizard.
+  const llmWheelIndex =
+    process.platform === 'win32'
+      ? 'https://abetlen.github.io/llama-cpp-python/whl/cu124'
+      : 'https://abetlen.github.io/llama-cpp-python/whl/cpu';
   setupWizard = new SetupWizardService({
     uvBinary: paths.uvBinary,
     pythonRuntime: paths.pythonRuntime,
     venvPath: paths.venvPath,
     venvPythonBinary: paths.venvPythonBinary,
     requirementsPath: paths.requirementsPath,
+    extraIndexUrls: [llmWheelIndex],
     spawn,
     fs: { access: fsPromises.access },
   });

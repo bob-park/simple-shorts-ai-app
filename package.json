@@ -1,6 +1,6 @@
 {
   "name": "simple-shorts-ai-app",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "YouTube to 9:16 shorts via local STT and LLM highlight extraction.",
   "main": "out/main/main.js",
