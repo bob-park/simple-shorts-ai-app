@@ -29,13 +29,20 @@ class StubTracker:
 class StubEngine:
     """Replays a fixed yield sequence; observes cancel via callback."""
 
-    def __init__(self, sequence):
+    def __init__(self, sequence, download_steps=None):
         self._sequence = sequence
+        self._download_steps = download_steps or []
+        self.ensure_model_args: dict | None = None
         self.last_args: dict | None = None
 
     @property
     def loaded_models(self):
         return ["stub"]
+
+    def ensure_model(self, model, *, on_progress, **_kwargs):
+        self.ensure_model_args = {"model": model}
+        for done, total in self._download_steps:
+            on_progress(done, total)
 
     def transcribe(self, audio_path, *, model, language=None, device="auto", is_canceled=None):
         self.last_args = {
@@ -95,9 +102,45 @@ def test_transcribe_emits_progress_then_final_result():
     progress_msgs = [m for m in msgs if m.get("method") == "progress"]
     final = [m for m in msgs if m.get("id") == "abc" and "result" in m]
     assert len(progress_msgs) == 2
-    assert progress_msgs[0]["params"] == {"jobId": "abc", "processed": 1.0, "total": 4.0}
+    assert progress_msgs[0]["params"] == {
+        "jobId": "abc",
+        "processed": 1.0,
+        "total": 4.0,
+        "phase": "transcribe",
+    }
     assert len(final) == 1
     assert final[0]["result"]["segments"][0]["text"] == "hi"
+
+
+def test_transcribe_emits_model_download_progress_before_transcription():
+    seq = [
+        TranscribeProgress(processed=2.0, total=2.0),
+        TranscribeResult(
+            segments=[{"start": 0.0, "end": 2.0, "text": "hi"}],
+            words=[],
+            duration=2.0,
+            language="en",
+        ),
+    ]
+    engine = StubEngine(seq, download_steps=[(50, 100), (100, 100)])
+    inbound, outbound = _run_server_with([
+        {"id": "abc", "method": "transcribe", "params": {"audio_path": "/x.mp4", "model": "small"}}
+    ])
+    server = Server(engine=engine)
+    server.run(inbound, outbound)
+    msgs = _drain(outbound)
+    progress = [m["params"] for m in msgs if m.get("method") == "progress"]
+    assert engine.ensure_model_args == {"model": "small"}
+    dl = [p for p in progress if p.get("phase") == "model-download"]
+    assert dl == [
+        {"jobId": "abc", "phase": "model-download", "processed": 50, "total": 100},
+        {"jobId": "abc", "phase": "model-download", "processed": 100, "total": 100},
+    ]
+    tr = [p for p in progress if p.get("phase") == "transcribe"]
+    assert tr and tr[0] == {"jobId": "abc", "phase": "transcribe", "processed": 2.0, "total": 2.0}
+    # All model-download progress must precede the first transcribe progress.
+    first_tr = next(i for i, p in enumerate(progress) if p.get("phase") == "transcribe")
+    assert all(progress[i]["phase"] == "model-download" for i in range(first_tr))
 
 
 def test_cancel_during_transcribe_emits_canceled_error():

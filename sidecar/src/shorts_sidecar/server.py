@@ -114,9 +114,33 @@ class Server:
 
     def _run_transcribe(self, job_id: str, params: dict, outbound: Queue) -> None:
         try:
+            model = params.get("model", "small")
+            # Prefetch the Whisper model WITH byte progress before load.
+            # faster-whisper's own download is silent (disabled_tqdm), so a
+            # multi-minute first-run download looks like a hang and users kill
+            # the app. ensure_model emits 'model-download' phase progress and
+            # clears interrupted-download debris. Guarded so engines/stubs
+            # without it still work; failures fall through to transcribe_failed
+            # (an actionable error beats a silent hang).
+            ensure_model = getattr(self._engine, "ensure_model", None)
+            if ensure_model is not None:
+                ensure_model(
+                    model,
+                    on_progress=lambda done, total: outbound.put(
+                        {
+                            "method": "progress",
+                            "params": {
+                                "jobId": job_id,
+                                "phase": "model-download",
+                                "processed": done,
+                                "total": total,
+                            },
+                        }
+                    ),
+                )
             stream = self._engine.transcribe(
                 params.get("audio_path"),
-                model=params.get("model", "small"),
+                model=model,
                 language=params.get("language"),
                 device=params.get("device", "auto"),
                 is_canceled=self._cancel_event.is_set,
@@ -130,6 +154,7 @@ class Server:
                                 "jobId": job_id,
                                 "processed": item.processed,
                                 "total": item.total,
+                                "phase": "transcribe",
                             },
                         }
                     )
