@@ -37,6 +37,13 @@ describe('FfmpegRunner', () => {
     expect(args).toEqual(['-i', '/tmp/in.mp4', '-c:v', 'libx264', '/tmp/out.mp4']);
   });
 
+  it('forwards cwd to the spawn options when provided (and omits it otherwise)', () => {
+    runner.run({ args: ['-i', 'in.mp4', 'out.mp4'], durationSec: 5, cwd: '/Users/Bob Smith/out' });
+    expect((spawn.mock.calls[0]![2] as { cwd?: string }).cwd).toBe('/Users/Bob Smith/out');
+    runner.run({ args: [], durationSec: 1 });
+    expect((spawn.mock.calls[1]![2] as { cwd?: string }).cwd).toBeUndefined();
+  });
+
   it('parses out_time_us from -progress lines and emits a 0..1 fraction', async () => {
     const handle = runner.run({ args: ['-i', '/tmp/in.mp4', '/tmp/out.mp4'], durationSec: 10 });
     const events: number[] = [];

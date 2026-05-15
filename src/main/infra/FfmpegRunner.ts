@@ -19,6 +19,14 @@ export interface RunOptions {
    * `out_time_us` into a 0..1 fraction. Pass the sum of the highlight's segment durations.
    */
   durationSec: number;
+  /**
+   * Working directory for the ffmpeg process. RenderService sets this to the
+   * clip's output dir so the sendcmd `.cmd`, subtitles `.ass`, and output
+   * `.mp4` can be referenced by bare ASCII basenames — keeping Windows paths
+   * with spaces / Korean / drive-colons out of the parse-fragile filtergraph
+   * and the output argv entirely.
+   */
+  cwd?: string;
 }
 
 export interface RunHandle {
@@ -37,7 +45,7 @@ export class FfmpegRunner {
   }
 
   run(opts: RunOptions): RunHandle {
-    const child = this.opts.spawn(this.cmd, opts.args, {});
+    const child = this.opts.spawn(this.cmd, opts.args, opts.cwd ? { cwd: opts.cwd } : {});
 
     const progressCallbacks: ((f: number) => void)[] = [];
     let stderrTail = '';

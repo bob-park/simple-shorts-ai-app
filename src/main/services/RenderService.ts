@@ -11,7 +11,7 @@ import { buildSendcmd } from './SendcmdGenerator';
 import { DEFAULT_SUBTITLE_STYLE, type SubtitleStyle, buildAssFile } from './SubtitleGenerator';
 
 interface RunnerLike {
-  run(opts: { args: readonly string[]; durationSec: number }): {
+  run(opts: { args: readonly string[]; durationSec: number; cwd?: string }): {
     onProgress(cb: (f: number) => void): void;
     cancel(): void;
     done: Promise<void>;
@@ -89,20 +89,29 @@ export class RenderService {
         results.push(this.buildClipResult(clipIndex, h, 'canceled', undefined, 'Render canceled'));
         continue;
       }
+      // Absolute paths — for the RenderClipResult / fs writes / history.
       const outputPath = join(opts.outputDir, `short_${clipIndex}.mp4`);
+      // Bare ASCII basenames — what ffmpeg actually sees. Combined with
+      // cwd=outputDir on the spawn, this keeps Windows paths containing
+      // spaces / Korean / drive-colons OUT of the parse-fragile inline
+      // filtergraph and the output argv (the root cause of the Windows
+      // "Error parsing filterchain … Invalid argument" render failure).
+      const outName = `short_${clipIndex}.mp4`;
+      const cmdName = `short_${clipIndex}.cmd`;
+      const assName = `short_${clipIndex}.ass`;
       const durationSec = h.segments.reduce((acc, s) => acc + (s.end_sec - s.start_sec), 0);
 
       const trackingInfo = this.tracker ? await this.maybeTrackAndPersist(opts, h, clipIndex) : null;
       const baseArgs =
         trackingInfo !== null
-          ? buildTrackedArgs(opts.sourcePath, h.segments, outputPath, trackingInfo.cmdPath)
-          : buildCenterArgs(opts.sourcePath, h.segments, outputPath);
+          ? buildTrackedArgs(opts.sourcePath, h.segments, outName, cmdName)
+          : buildCenterArgs(opts.sourcePath, h.segments, outName);
       // ASS file is always written — it carries the title-bar text even when
       // no transcript words / no subtitleOptions are provided.
       const assInfo = await this.writeAssFile(opts, h, clipIndex, durationSec);
       const args = this.subtitlesUnavailable
         ? baseArgs
-        : appendSubtitleFilter(baseArgs, assInfo.assPath);
+        : appendSubtitleFilter(baseArgs, assName);
       // For the user-facing RenderClipResult.subtitles field, only report a
       // populated subtitles record when at least one word cue was emitted AND
       // the filter was actually applied. A title-only ASS (cues=0) or a
@@ -110,7 +119,7 @@ export class RenderService {
       const reportedSubtitles =
         !this.subtitlesUnavailable && assInfo.cues > 0 ? assInfo : null;
 
-      const handle = this.runner.run({ args, durationSec });
+      const handle = this.runner.run({ args, durationSec, cwd: opts.outputDir });
       this.activeHandle = handle;
       handle.onProgress((fraction) => {
         for (const cb of this.progressHandlers) {
@@ -137,7 +146,7 @@ export class RenderService {
         } else if (!this.subtitlesUnavailable && /No such filter: ['"]subtitles['"]/.test(message)) {
           this.subtitlesUnavailable = true;
           this.activeHandle = null;
-          const retryHandle = this.runner.run({ args: baseArgs, durationSec });
+          const retryHandle = this.runner.run({ args: baseArgs, durationSec, cwd: opts.outputDir });
           this.activeHandle = retryHandle;
           retryHandle.onProgress((fraction) => {
             for (const cb of this.progressHandlers) {
