@@ -30,6 +30,15 @@ export interface SetupWizardOptions {
    * `--extra-index-url` directive there.
    */
   extraIndexUrls?: readonly string[];
+  /**
+   * Optional PEP-508 spec written to a uv `--overrides` file so it FORCES a
+   * package version regardless of the pin in requirements.txt (no resolution
+   * conflict — that's what overrides are for). Used for the EXPERIMENTAL
+   * NVIDIA path: requirements.txt pins the CPU-safe `llama-cpp-python==0.3.19`
+   * (the Problem-A corrupt-wheel guard), but an NVIDIA box overrides it to
+   * the CUDA `==0.3.23` from the cu124 index. Absent on the default path.
+   */
+  llamaCudaOverrideSpec?: string;
   spawn: SpawnLike;
   fs: FsLike;
 }
@@ -94,12 +103,21 @@ export class SetupWizardService {
       '--extra-index-url',
       url,
     ]);
+    // EXPERIMENTAL NVIDIA path: force the CUDA llama-cpp-python via a uv
+    // --overrides file (venv exists now, post `uv venv`). No-op by default.
+    let overrideArgs: string[] = [];
+    if (this.opts.llamaCudaOverrideSpec) {
+      const overridePath = join(this.opts.venvPath, '.llama-override.txt');
+      await this.opts.fs.writeFile(overridePath, `${this.opts.llamaCudaOverrideSpec}\n`);
+      overrideArgs = ['--overrides', overridePath];
+    }
     await this.spawnAndWait(
       this.opts.uvBinary,
       [
         'pip',
         'install',
         ...extraIndexArgs,
+        ...overrideArgs,
         '--python',
         this.opts.venvPythonBinary,
         '-r',

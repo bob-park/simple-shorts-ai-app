@@ -302,3 +302,61 @@ describe('SetupWizardService.selfTest + status gating', () => {
     expect(await svc.status()).toBe('ready');
   });
 });
+
+describe('SetupWizardService.run llamaCudaOverrideSpec (EXPERIMENTAL NVIDIA path)', () => {
+  it('writes a uv overrides file and passes --overrides to pip install', async () => {
+    const { spawn, children } = makeSpawn();
+    const writeFile = vi.fn(async () => undefined);
+    const svc = new SetupWizardService({
+      ...opts,
+      extraIndexUrls: ['https://abetlen.github.io/llama-cpp-python/whl/cu124'],
+      llamaCudaOverrideSpec: 'llama-cpp-python==0.3.23',
+      spawn,
+      fs: { access: vi.fn(async () => undefined), writeFile },
+    } as never);
+    const promise = svc.run();
+    setImmediate(() => children[0]!.emit('exit', 0));
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => children[1]!.emit('exit', 0));
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => children[2]!.emit('exit', 0));
+    await promise;
+    expect(writeFile).toHaveBeenCalledWith('/data/sidecar-venv/.llama-override.txt', 'llama-cpp-python==0.3.23\n');
+    expect(spawn).toHaveBeenNthCalledWith(
+      2,
+      '/r/uv',
+      [
+        'pip',
+        'install',
+        '--extra-index-url',
+        'https://abetlen.github.io/llama-cpp-python/whl/cu124',
+        '--overrides',
+        '/data/sidecar-venv/.llama-override.txt',
+        '--python',
+        '/data/sidecar-venv/bin/python',
+        '-r',
+        '/r/requirements.txt',
+      ],
+      expect.anything(),
+    );
+  });
+
+  it('default path (no override spec): no overrides file, no --overrides arg', async () => {
+    const { spawn, children } = makeSpawn();
+    const writeFile = vi.fn(async () => undefined);
+    const svc = new SetupWizardService({
+      ...opts,
+      spawn,
+      fs: { access: vi.fn(async () => undefined), writeFile },
+    } as never);
+    const promise = svc.run();
+    setImmediate(() => children[0]!.emit('exit', 0));
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => children[1]!.emit('exit', 0));
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => children[2]!.emit('exit', 0));
+    await promise;
+    expect(writeFile).not.toHaveBeenCalledWith(expect.stringContaining('.llama-override.txt'), expect.anything());
+    expect(spawn).toHaveBeenNthCalledWith(2, '/r/uv', expect.not.arrayContaining(['--overrides']), expect.anything());
+  });
+});

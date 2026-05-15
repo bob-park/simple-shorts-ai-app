@@ -14,6 +14,7 @@ import { promisify } from 'node:util';
 import youtubeDl from 'youtube-dl-exec';
 
 import { FfmpegRunner } from './infra/FfmpegRunner';
+import { nvidiaGpuPresent } from './infra/GpuProbe';
 import { HistoryRepo } from './infra/HistoryRepo';
 import { NVENC_VIDEO_ARGS, X264_VIDEO_ARGS, nvencAvailable } from './infra/HwEncoder';
 import { PythonSidecar } from './infra/PythonSidecar';
@@ -252,6 +253,34 @@ async function ensureVideoEncoderArgs(): Promise<readonly string[]> {
   return resolvedVideoEncoderArgs;
 }
 
+const LLAMA_CPU_INDEX = 'https://abetlen.github.io/llama-cpp-python/whl/cpu';
+const LLAMA_CUDA_INDEX = 'https://abetlen.github.io/llama-cpp-python/whl/cu124';
+const LLAMA_CUDA_OVERRIDE_SPEC = 'llama-cpp-python==0.3.23';
+let resolvedLlamaIndex: string | null = null;
+let resolvedLlamaCudaOverrideSpec: string | undefined;
+/**
+ * Decide the llama-cpp-python wheel ONCE per process. Default = the CPU
+ * build pinned `==0.3.19` (via requirements.txt; the Problem-A corrupt-wheel
+ * guard). EXPERIMENTAL: if an NVIDIA GPU is detected, switch to the cu124
+ * CUDA index and force `==0.3.23` via a uv --overrides file. This is gated
+ * so non-NVIDIA / macOS users are completely unaffected; lazy `llama_cpp`
+ * import (llm_engine.py) still contains any CUDA-load failure to chat().
+ * Whether cu124 (CUDA 12.4) actually runs on a Blackwell sm_120 GPU depends
+ * on the wheel shipping forward-compatible PTX — unverifiable here; the
+ * user's machine + sidecar.log are the oracle.
+ */
+async function ensureLlamaWheelPlan(): Promise<void> {
+  if (resolvedLlamaIndex) return;
+  const hasNvidia = await nvidiaGpuPresent({ spawn });
+  resolvedLlamaIndex = hasNvidia ? LLAMA_CUDA_INDEX : LLAMA_CPU_INDEX;
+  resolvedLlamaCudaOverrideSpec = hasNvidia ? LLAMA_CUDA_OVERRIDE_SPEC : undefined;
+  getSidecarLogger().append(
+    `[${new Date().toISOString()}] setup: llama-cpp-python = ${
+      hasNvidia ? 'EXPERIMENTAL CUDA cu124 (==0.3.23) — NVIDIA GPU detected' : 'CPU (==0.3.19, requirements pin)'
+    }\n`,
+  );
+}
+
 function getRenderService(): RenderService {
   if (renderService) return renderService;
   const paths = resolveRuntimePaths();
@@ -324,17 +353,13 @@ function getResumeService(): ResumeService {
 function getSetupWizard(): SetupWizardService {
   if (setupWizard) return setupWizard;
   const paths = resolveRuntimePaths();
-  // llama-cpp-python's whl/cu124 wheel does NOT fall back to CPU cleanly —
-  // when the .pyd loads, it eagerly probes the NVIDIA driver, and on a
-  // machine without one the very `from llama_cpp import Llama` (top-level
-  // in llm_engine.py) crashes the sidecar with exit code 1 before STT can
-  // even run. Until we add a first-launch GPU-detect step that conditionally
-  // picks cu124 vs cpu, pin the CPU build on every platform. Whisper GPU
-  // (via faster-whisper + ctranslate2) is separately gated by the user's
-  // settings.whisper.device choice and the NVIDIA bundle in requirements.txt,
-  // so this rollback doesn't affect it. LLM GPU acceleration is deferred to
-  // a future milestone.
-  const llmWheelIndex = 'https://abetlen.github.io/llama-cpp-python/whl/cpu';
+  // llama-cpp-python wheel: CPU by default (requirements pins ==0.3.19 — the
+  // Problem-A corrupt-wheel guard). The EXPERIMENTAL NVIDIA path (cu124 +
+  // ==0.3.23 override) is selected by ensureLlamaWheelPlan(), which the
+  // setup:run handler resolves (and rebuilds this wizard) before run().
+  // Falls back to the CPU index if the plan hasn't resolved yet (e.g. a
+  // setup:status call before setup:run constructs the wizard).
+  const llmWheelIndex = resolvedLlamaIndex ?? LLAMA_CPU_INDEX;
   setupWizard = new SetupWizardService({
     uvBinary: paths.uvBinary,
     pythonRuntime: paths.pythonRuntime,
@@ -342,6 +367,7 @@ function getSetupWizard(): SetupWizardService {
     venvPythonBinary: paths.venvPythonBinary,
     requirementsPath: paths.requirementsPath,
     extraIndexUrls: [llmWheelIndex],
+    llamaCudaOverrideSpec: resolvedLlamaCudaOverrideSpec,
     spawn,
     fs: { access: fsPromises.access, writeFile: fsPromises.writeFile },
   });
@@ -750,7 +776,14 @@ void app.whenReady().then(() => {
   });
 
   ipcMain.handle('setup:status', () => getSetupWizard().status());
-  ipcMain.handle('setup:run', () => getSetupWizard().run());
+  ipcMain.handle('setup:run', async () => {
+    // Resolve the llama wheel plan (NVIDIA probe) and rebuild the wizard so
+    // the EXPERIMENTAL CUDA path is honored even if setup:status already
+    // constructed a CPU-default wizard earlier.
+    await ensureLlamaWheelPlan();
+    setupWizard = null;
+    return getSetupWizard().run();
+  });
 
   createMainWindow();
 
