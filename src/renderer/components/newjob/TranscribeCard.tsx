@@ -41,7 +41,16 @@ export function TranscribeCard(props: Props) {
       ) : null}
 
       {props.status === 'starting' ? (
-        <p className="text-body-md text-slate">사이드카 시작 + 모델 로딩 중... (최초 1회 수십 초 소요)</p>
+        <div className="gap-md flex flex-col">
+          <h3 className="text-card-title text-ink font-semibold">전사 준비 중…</h3>
+          <p className="text-body-sm text-slate">
+            사이드카를 시작하고 Whisper 모델을 불러옵니다. 처음 실행 시 모델을 새로 다운로드하며, 모델 크기·네트워크
+            속도에 따라 수 분 걸릴 수 있습니다. 진행되는 동안 창을 닫지 마세요.
+          </p>
+          <div role="progressbar" aria-label="모델 준비 중" className="bg-surface h-2 overflow-hidden rounded-full">
+            <div className="bg-primary h-full w-1/3 animate-pulse rounded-full" />
+          </div>
+        </div>
       ) : null}
 
       {props.status === 'transcribing' ? (
