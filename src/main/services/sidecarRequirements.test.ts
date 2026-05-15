@@ -23,9 +23,7 @@ const REQUIREMENTS = readFileSync(join(REPO_ROOT, 'sidecar', 'requirements.txt')
 
 describe('sidecar/requirements.txt llama-cpp-python pin', () => {
   it('pins llama-cpp-python to exactly ==0.3.19 (not a >= float)', () => {
-    const line = REQUIREMENTS.split(/\r?\n/).find((l) =>
-      /^\s*llama-cpp-python\s*[=<>!~]/.test(l),
-    );
+    const line = REQUIREMENTS.split(/\r?\n/).find((l) => /^\s*llama-cpp-python\s*[=<>!~]/.test(l));
     expect(line).toBeDefined();
     expect(line!.trim()).toBe('llama-cpp-python==0.3.19');
   });
