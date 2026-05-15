@@ -258,3 +258,47 @@ def test_ensure_model_cleans_stale_incomplete_and_lock_files(tmp_path):
     assert not incomplete.exists()  # stale partial removed
     assert not lock.exists()  # stale lock removed
     assert good_blob.exists()  # completed blob untouched
+
+
+# --- GPU device → CPU graceful fallback (Blackwell / unsupported CUDA) -------
+
+
+def test_transcribe_falls_back_to_cpu_when_cuda_device_fails(capsys):
+    calls: list[str] = []
+
+    def factory(model: str, **kwargs):
+        dev = kwargs["device"]
+        calls.append(dev)
+        if dev == "cuda":
+            raise RuntimeError("no kernel image is available for execution on the device")
+        return FakeWhisperModel(model)
+
+    engine = WhisperEngine(model_factory=factory)
+    out = list(engine.transcribe("/tmp/a.mp4", model="small", device="cuda"))
+
+    assert calls == ["cuda", "cpu"]  # tried GPU, fell back to CPU
+    assert isinstance(out[-1], TranscribeResult)
+    err = capsys.readouterr().err
+    assert "device='cuda' unavailable" in err
+    assert "no kernel image" in err  # exact CUDA error is surfaced for diagnosis
+
+
+def test_transcribe_cpu_failure_is_not_retried():
+    def factory(model: str, **_kwargs):
+        raise RuntimeError("boom")
+
+    engine = WhisperEngine(model_factory=factory)
+    with pytest.raises(RuntimeError, match="boom"):
+        list(engine.transcribe("/tmp/a.mp4", model="small", device="cpu"))
+
+
+def test_transcribe_no_cpu_fallback_when_requested_device_succeeds():
+    calls: list[str] = []
+
+    def factory(model: str, **kwargs):
+        calls.append(kwargs["device"])
+        return FakeWhisperModel(model)
+
+    engine = WhisperEngine(model_factory=factory)
+    list(engine.transcribe("/tmp/a.mp4", model="small", device="cuda"))
+    assert calls == ["cuda"]  # no needless CPU re-attempt when GPU works

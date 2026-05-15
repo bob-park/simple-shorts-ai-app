@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Protocol
 
@@ -195,12 +196,33 @@ class WhisperEngine:
         device: str = "auto",
         is_canceled: Callable[[], bool] | None = None,
     ) -> Iterator[TranscribeProgress | TranscribeResult]:
-        whisper = self._get(model, device)
         kwargs: dict[str, Any] = {"word_timestamps": True}
         if language and language != "auto":
             kwargs["language"] = language
 
-        segments_iter, info = whisper.transcribe(audio_path, **kwargs)
+        def _attempt(dev: str):
+            whisper = self._get(model, dev)
+            return whisper.transcribe(audio_path, **kwargs)
+
+        try:
+            segments_iter, info = _attempt(device)
+        except Exception as e:
+            # GPU init / kernel failure (e.g. an RTX 50-series Blackwell
+            # sm_120 GPU when the bundled CTranslate2 build has no matching
+            # kernels). Don't hard-fail the pipeline: log the exact error
+            # (teed to sidecar.log for diagnosis) and fall back to CPU. A
+            # 'cpu' request that fails is a real error — re-raise it.
+            if device == "cpu":
+                raise
+            sys.stderr.write(
+                f"[whisper] device={device!r} unavailable "
+                f"({type(e).__name__}: {e}); falling back to device='cpu'\n"
+            )
+            # Drop any half-built (model, device) entry so we don't reuse a
+            # broken GPU model on the next call.
+            self._cache.pop((model, device), None)
+            segments_iter, info = _attempt("cpu")
+
         total = float(getattr(info, "duration", 0.0))
 
         out_segments: list[dict] = []
