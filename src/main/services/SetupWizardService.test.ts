@@ -45,6 +45,7 @@ describe('SetupWizardService.status', () => {
     } as never);
     expect(await svc.status()).toBe('ready');
     expect(access).toHaveBeenCalledWith('/data/sidecar-venv/bin/python');
+    expect(access).toHaveBeenCalledWith('/data/sidecar-venv/.stt-selftest-ok');
   });
 
   it('Windows: probes the Scripts\\python.exe path supplied via opts.venvPythonBinary', async () => {
@@ -79,12 +80,14 @@ describe('SetupWizardService.run', () => {
     const svc = new SetupWizardService({
       ...opts,
       spawn,
-      fs: { access: vi.fn(async () => undefined) },
+      fs: { access: vi.fn(async () => undefined), writeFile: vi.fn(async () => undefined) },
     } as never);
     const promise = svc.run();
     setImmediate(() => children[0]!.emit('exit', 0));
     await new Promise((r) => setImmediate(r));
     setImmediate(() => children[1]!.emit('exit', 0));
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => children[2]!.emit('exit', 0));
     await promise;
     expect(spawn).toHaveBeenNthCalledWith(
       1,
@@ -105,12 +108,14 @@ describe('SetupWizardService.run', () => {
     const svc = new SetupWizardService({
       ...WIN_OPTS,
       spawn,
-      fs: { access: vi.fn(async () => undefined) },
+      fs: { access: vi.fn(async () => undefined), writeFile: vi.fn(async () => undefined) },
     } as never);
     const promise = svc.run();
     setImmediate(() => children[0]!.emit('exit', 0));
     await new Promise((r) => setImmediate(r));
     setImmediate(() => children[1]!.emit('exit', 0));
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => children[2]!.emit('exit', 0));
     await promise;
     expect(spawn).toHaveBeenNthCalledWith(
       2,
@@ -136,12 +141,14 @@ describe('SetupWizardService.run', () => {
         'https://example.com/extra',
       ],
       spawn,
-      fs: { access: vi.fn(async () => undefined) },
+      fs: { access: vi.fn(async () => undefined), writeFile: vi.fn(async () => undefined) },
     } as never);
     const promise = svc.run();
     setImmediate(() => children[0]!.emit('exit', 0));
     await new Promise((r) => setImmediate(r));
     setImmediate(() => children[1]!.emit('exit', 0));
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => children[2]!.emit('exit', 0));
     await promise;
     expect(spawn).toHaveBeenNthCalledWith(
       2,
@@ -167,7 +174,7 @@ describe('SetupWizardService.run', () => {
     const svc = new SetupWizardService({
       ...opts,
       spawn,
-      fs: { access: vi.fn(async () => undefined) },
+      fs: { access: vi.fn(async () => undefined), writeFile: vi.fn(async () => undefined) },
     } as never);
     const promise = svc.run();
     setImmediate(() => {
@@ -182,7 +189,7 @@ describe('SetupWizardService.run', () => {
     const svc = new SetupWizardService({
       ...opts,
       spawn,
-      fs: { access: vi.fn(async () => undefined) },
+      fs: { access: vi.fn(async () => undefined), writeFile: vi.fn(async () => undefined) },
     } as never);
     const events: SetupProgress[] = [];
     svc.onProgress((p) => events.push(p));
@@ -195,6 +202,8 @@ describe('SetupWizardService.run', () => {
       children[1]!.stdout.emit('data', Buffer.from('Installed mediapipe-0.10.18\n'));
       children[1]!.emit('exit', 0);
     });
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => children[2]!.emit('exit', 0));
     await promise;
     const pipEvents = events.filter((e) => e.phase === 'pip');
     expect(pipEvents.length).toBeGreaterThan(0);
@@ -209,7 +218,7 @@ describe('SetupWizardService.run', () => {
     const svc = new SetupWizardService({
       ...opts,
       spawn,
-      fs: { access: vi.fn(async () => undefined) },
+      fs: { access: vi.fn(async () => undefined), writeFile: vi.fn(async () => undefined) },
     } as never);
     const events: SetupProgress[] = [];
     svc.onProgress((p) => events.push(p));
@@ -217,9 +226,79 @@ describe('SetupWizardService.run', () => {
     setImmediate(() => children[0]!.emit('exit', 0));
     await new Promise((r) => setImmediate(r));
     setImmediate(() => children[1]!.emit('exit', 0));
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => children[2]!.emit('exit', 0));
     await promise;
     const venvEvents = events.filter((e) => e.phase === 'venv');
     expect(venvEvents.length).toBe(1);
     expect(venvEvents[0]!.pct).toBe(1);
+  });
+});
+
+describe('SetupWizardService.selfTest + status gating', () => {
+  it('run() spawns the STT import probe with the venv python after pip install', async () => {
+    const { spawn, children } = makeSpawn();
+    const writeFile = vi.fn(async () => undefined);
+    const svc = new SetupWizardService({
+      ...opts,
+      spawn,
+      fs: { access: vi.fn(async () => undefined), writeFile },
+    } as never);
+    const promise = svc.run();
+    setImmediate(() => children[0]!.emit('exit', 0));
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => children[1]!.emit('exit', 0));
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => children[2]!.emit('exit', 0));
+    await promise;
+    expect(spawn).toHaveBeenNthCalledWith(
+      3,
+      '/data/sidecar-venv/bin/python',
+      ['-c', 'import faster_whisper, ctranslate2, av; print("stt-ok")'],
+      expect.anything(),
+    );
+    expect(writeFile).toHaveBeenCalledWith('/data/sidecar-venv/.stt-selftest-ok', 'ok');
+  });
+
+  it('run() rejects with the probe stderr when the self-test fails (no sentinel written)', async () => {
+    const { spawn, children } = makeSpawn();
+    const writeFile = vi.fn(async () => undefined);
+    const svc = new SetupWizardService({
+      ...opts,
+      spawn,
+      fs: { access: vi.fn(async () => undefined), writeFile },
+    } as never);
+    const promise = svc.run();
+    setImmediate(() => children[0]!.emit('exit', 0));
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => children[1]!.emit('exit', 0));
+    await new Promise((r) => setImmediate(r));
+    setImmediate(() => {
+      children[2]!.stderr.emit('data', Buffer.from('ImportError: DLL load failed: ctranslate2'));
+      children[2]!.emit('exit', 1);
+    });
+    await expect(promise).rejects.toThrow(/DLL load failed: ctranslate2/);
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it("status() is 'pending' when the venv exists but the self-test sentinel does not", async () => {
+    const access = vi.fn(async (p: string) => {
+      if (p === '/data/sidecar-venv/.stt-selftest-ok') throw new Error('ENOENT');
+    });
+    const svc = new SetupWizardService({
+      ...opts,
+      spawn: vi.fn(),
+      fs: { access, writeFile: vi.fn(async () => undefined) },
+    } as never);
+    expect(await svc.status()).toBe('pending');
+  });
+
+  it("status() is 'ready' when both the venv python and the sentinel exist", async () => {
+    const svc = new SetupWizardService({
+      ...opts,
+      spawn: vi.fn(),
+      fs: { access: vi.fn(async () => undefined), writeFile: vi.fn(async () => undefined) },
+    } as never);
+    expect(await svc.status()).toBe('ready');
   });
 });

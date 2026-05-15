@@ -1,8 +1,10 @@
 import type { SetupProgress, SetupStatus } from '@shared/setup';
 import type { ChildProcess } from 'node:child_process';
+import { join } from 'node:path';
 
 interface FsLike {
   access: (path: string) => Promise<void>;
+  writeFile: (path: string, data: string) => Promise<void>;
 }
 
 type SpawnLike = (command: string, args: readonly string[], options?: Record<string, unknown>) => ChildProcess;
@@ -46,9 +48,28 @@ export class SetupWizardService {
 
   constructor(private readonly opts: SetupWizardOptions) {}
 
+  private get sentinelPath(): string {
+    return join(this.opts.venvPath, '.stt-selftest-ok');
+  }
+
+  /**
+   * Imports the STT runtime (faster_whisper / ctranslate2 / av) in the venv
+   * python to fail fast at setup time instead of mid-job. Called by `run()`
+   * after pip install; `run()` (not this method) writes the success sentinel,
+   * so calling `selfTest()` standalone never marks setup ready.
+   */
+  async selfTest(): Promise<void> {
+    await this.spawnAndWait(
+      this.opts.venvPythonBinary,
+      ['-c', 'import faster_whisper, ctranslate2, av; print("stt-ok")'],
+      'selftest',
+    );
+  }
+
   async status(): Promise<SetupStatus> {
     try {
       await this.opts.fs.access(this.opts.venvPythonBinary);
+      await this.opts.fs.access(this.sentinelPath);
       return 'ready';
     } catch {
       return 'pending';
@@ -86,9 +107,11 @@ export class SetupWizardService {
       ],
       'pip',
     );
+    await this.selfTest();
+    await this.opts.fs.writeFile(this.sentinelPath, 'ok');
   }
 
-  private spawnAndWait(cmd: string, args: string[], phase: 'venv' | 'pip'): Promise<void> {
+  private spawnAndWait(cmd: string, args: string[], phase: 'venv' | 'pip' | 'selftest'): Promise<void> {
     return new Promise((resolveP, rejectP) => {
       const child = this.opts.spawn(cmd, args, {});
       let stderrTail = '';
