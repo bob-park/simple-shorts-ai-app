@@ -6,8 +6,9 @@ This guide walks through cross-building the Windows NSIS installer from a macOS 
 
 - macOS host (Apple Silicon recommended; Intel works but is untested for this build).
 - Node 24+, Yarn 4 (the repo's `.yarnrc.yml` pins this).
+- **Wine is required** (`brew install --cask wine-stable`; Apple Silicon also needs Rosetta 2: `softwareupdate --install-rosetta --agree-to-license`).
 
-No wine required. electron-builder 25.x bundles its own NSIS makensis (cached under `~/Library/Caches/electron-builder/`) and shells out to it directly on macOS hosts. This is a change from older electron-builder versions where wine was needed on non-Windows hosts.
+electron-builder 25.x bundles its own NSIS makensis and compiles the **installer** directly on the macOS host (no wine needed for that). However, it generates the **uninstaller** by *executing the just-built Windows installer stub* in a temp area to emit `Uninstall …exe` — a Windows PE that cannot run on macOS without wine. Without wine, electron-builder still produces an uninstaller but its embedded NSIS CRC is wrong, so running it on Windows fails at launch with **"NSIS Error — Installer integrity check has failed"** (the *installer* is unaffected and installs fine). Hence wine is mandatory for a working uninstaller. (Earlier revisions of this guide incorrectly claimed "no wine required" — that held only for the installer.)
 
 ## Building
 
