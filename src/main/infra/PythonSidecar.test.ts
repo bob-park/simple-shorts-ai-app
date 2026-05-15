@@ -94,6 +94,24 @@ describe('PythonSidecar', () => {
     expect(events).toEqual([{ jobId: 'abc', processed: 1.5, total: 4.0 }]);
   });
 
+  it('tees stderr to the injected logSink as well as process.stderr', async () => {
+    const logSink = vi.fn();
+    const s = new PythonSidecar({
+      spawn: spawn as never,
+      command: 'uv',
+      args: ['run'],
+      cwd: '/tmp/sidecar',
+      env: {},
+      logSink,
+    });
+    void s.request<unknown>('health').catch(() => undefined);
+    (child.stdin as PassThrough).read();
+    child.stderr.write(Buffer.from('boom traceback\n'));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(logSink).toHaveBeenCalledWith('[sidecar] boom traceback\n');
+    s.shutdown();
+  });
+
   it('handles the child exiting unexpectedly by failing in-flight requests and respawning on next call', async () => {
     const a = sidecar.request<unknown>('health');
     (child.stdin as PassThrough).read();

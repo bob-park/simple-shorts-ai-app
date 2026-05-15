@@ -13,6 +13,8 @@ export interface PythonSidecarOptions {
   args: readonly string[];
   cwd: string;
   env?: NodeJS.ProcessEnv;
+  /** Best-effort tee for sidecar stderr (diagnostics). */
+  logSink?: (chunk: string) => void;
 }
 
 interface PendingRequest {
@@ -107,7 +109,9 @@ export class PythonSidecar {
 
     child.stderr.on('data', (chunk: Buffer) => {
       // Forward sidecar logs to our stderr for diagnostics.
-      process.stderr.write(`[sidecar] ${chunk}`);
+      const line = `[sidecar] ${chunk}`;
+      process.stderr.write(line);
+      this.opts.logSink?.(line);
     });
 
     child.on('exit', (code) => {
