@@ -49,6 +49,12 @@ win:
       to: yt-dlp.exe
 
 nsis:
+  # Custom NSIS header — sets `CRCCheck off` so the macOS-cross-built (no-wine)
+  # uninstaller doesn't fail its launch-time integrity self-check on Windows
+  # ("NSIS Error — Installer integrity check has failed"). See nsis/installer.nsh
+  # and docs/build-windows.md. Tracked path (eb-default build/ is .gitignored);
+  # eb resolves a custom include relative to the project dir.
+  include: nsis/installer.nsh
   oneClick: false                        # show install wizard, let user pick install dir
   perMachine: false                      # install into %LOCALAPPDATA% (no admin prompt)
   # perMachine: false + allowElevation: true (the default) is electron-builder's
