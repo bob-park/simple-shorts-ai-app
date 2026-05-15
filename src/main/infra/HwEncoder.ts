@@ -31,7 +31,7 @@ export function nvencProbeArgs(): string[] {
     '-f',
     'lavfi',
     '-i',
-    'color=c=black:s=64x64:r=5:d=0.1',
+    'color=c=black:s=320x240:r=5:d=0.1',
     '-c:v',
     'h264_nvenc',
     '-f',
