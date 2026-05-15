@@ -29,6 +29,18 @@ class TranscribeResult:
     duration: float = 0.0
 
 
+# Mirrors faster_whisper.utils.download_model's allow_patterns — the only
+# files a CTranslate2 Whisper model needs. Kept here so our progress-enabled
+# prefetch downloads exactly the same set faster-whisper would.
+_WHISPER_ALLOW_PATTERNS = [
+    "config.json",
+    "preprocessor_config.json",
+    "model.bin",
+    "tokenizer.json",
+    "vocabulary.*",
+]
+
+
 def _default_factory(model: str, **kwargs: Any):  # pragma: no cover - integration only
     from faster_whisper import WhisperModel
 
@@ -65,6 +77,114 @@ class WhisperEngine:
         if key not in self._cache:
             self._cache[key] = self._factory(model, device=device)
         return self._cache[key]
+
+    @staticmethod
+    def _repo_folder_name(repo_id: str) -> str:
+        # huggingface_hub cache layout: models--<org>--<name>
+        return "models--" + repo_id.replace("/", "--")
+
+    def _cleanup_stale_cache(self, hf_cache_dir: str, repo_id: str) -> None:
+        """Remove a prior interrupted download's debris for this repo.
+
+        Killing the app mid-download leaves `*.incomplete` blobs and stale
+        `.locks/` entries. faster-whisper would try to resume the partial
+        blob; if it is corrupt that can wedge or loop, so a clean refetch is
+        safer. Best-effort — never raises.
+        """
+        from pathlib import Path  # noqa: PLC0415
+
+        base = Path(hf_cache_dir)
+        folder = self._repo_folder_name(repo_id)
+        blobs = base / folder / "blobs"
+        if blobs.is_dir():
+            for p in blobs.glob("*.incomplete"):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+        locks = base / ".locks" / folder
+        if locks.is_dir():
+            for p in locks.iterdir():
+                try:
+                    if p.is_file():
+                        p.unlink()
+                except OSError:
+                    pass
+
+    def _progress_tqdm(self, on_progress: Callable[[int, int], None]) -> type:
+        """A tqdm subclass that aggregates byte counts across every per-file
+        tqdm huggingface_hub creates and forwards cumulative (done, total) to
+        `on_progress`. Subclasses hf's own tqdm so it stays fully compatible
+        with snapshot_download's usage (context manager, kwargs, disabled
+        mode) while we only hook construction + update.
+        """
+        from huggingface_hub.utils import tqdm as _hf_tqdm  # noqa: PLC0415
+
+        state = {"done": 0, "total": 0}
+
+        def emit() -> None:
+            try:
+                on_progress(state["done"], state["total"])
+            except Exception:
+                pass
+
+        class _ProgressTqdm(_hf_tqdm):  # type: ignore[misc, valid-type]
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+                state["total"] += int(self.total or 0)
+
+            def update(self, n: float = 1) -> Any:
+                ret = super().update(n)
+                state["done"] += int(n or 0)
+                emit()
+                return ret
+
+        return _ProgressTqdm
+
+    def ensure_model(
+        self,
+        model: str,
+        *,
+        on_progress: Callable[[int, int], None],
+        snapshot_download: Callable[..., Any] | None = None,
+        hf_cache_dir: str | None = None,
+    ) -> None:
+        """Prefetch the faster-whisper model into the HF cache WITH byte
+        progress, before `WhisperModel(...)` loads it.
+
+        faster-whisper's own `download_model` passes `tqdm_class=disabled_tqdm`,
+        so a multi-minute first-run download is completely invisible — the
+        user cannot tell "downloading" from "hung" and kills the app. We
+        download the identical file set via `snapshot_download` with a
+        progress tqdm into the same HF_HOME cache; the subsequent
+        `WhisperModel(...)` then loads from cache with no second download.
+        """
+        if "/" in model:
+            repo_id = model
+        else:
+            from faster_whisper.utils import _MODELS  # noqa: PLC0415
+
+            repo_id = _MODELS.get(model)
+            if repo_id is None:
+                raise ValueError(f"unknown whisper model size: {model!r}")
+
+        if hf_cache_dir is None:
+            from huggingface_hub.constants import HF_HUB_CACHE  # noqa: PLC0415
+
+            hf_cache_dir = HF_HUB_CACHE
+
+        self._cleanup_stale_cache(hf_cache_dir, repo_id)
+
+        if snapshot_download is None:
+            from huggingface_hub import (  # noqa: PLC0415
+                snapshot_download as snapshot_download,
+            )
+
+        snapshot_download(
+            repo_id,
+            allow_patterns=_WHISPER_ALLOW_PATTERNS,
+            tqdm_class=self._progress_tqdm(on_progress),
+        )
 
     def transcribe(
         self,
