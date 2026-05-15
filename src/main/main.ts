@@ -15,6 +15,7 @@ import youtubeDl from 'youtube-dl-exec';
 
 import { FfmpegRunner } from './infra/FfmpegRunner';
 import { HistoryRepo } from './infra/HistoryRepo';
+import { NVENC_VIDEO_ARGS, X264_VIDEO_ARGS, nvencAvailable } from './infra/HwEncoder';
 import { PythonSidecar } from './infra/PythonSidecar';
 import { SettingsStore } from './infra/SettingsStore';
 import { SidecarLlmClient } from './infra/SidecarLlmClient';
@@ -230,6 +231,27 @@ function getHighlightService(): HighlightService {
   return highlightService;
 }
 
+let resolvedVideoEncoderArgs: readonly string[] | null = null;
+/**
+ * Resolve the ffmpeg video encoder ONCE per process: probe the bundled
+ * ffmpeg for a working `h264_nvenc` (NVIDIA HW-accelerated encode) and cache
+ * NVENC args if the probe succeeds, else libx264. RenderService additionally
+ * falls back to libx264 at run time if a real NVENC encode fails.
+ */
+async function ensureVideoEncoderArgs(): Promise<readonly string[]> {
+  if (resolvedVideoEncoderArgs) return resolvedVideoEncoderArgs;
+  const paths = resolveRuntimePaths();
+  const ffmpegCmd = existsSync(paths.ffmpegBinary) ? paths.ffmpegBinary : 'ffmpeg';
+  const nvenc = await nvencAvailable({ ffmpegCmd, spawn });
+  resolvedVideoEncoderArgs = nvenc ? NVENC_VIDEO_ARGS : X264_VIDEO_ARGS;
+  getSidecarLogger().append(
+    `[${new Date().toISOString()}] render: video encoder = ${
+      nvenc ? 'h264_nvenc (NVIDIA HW accel)' : 'libx264 (CPU; no usable NVENC)'
+    }\n`,
+  );
+  return resolvedVideoEncoderArgs;
+}
+
 function getRenderService(): RenderService {
   if (renderService) return renderService;
   const paths = resolveRuntimePaths();
@@ -251,7 +273,10 @@ function getRenderService(): RenderService {
     throw new Error('PythonSidecar failed to initialise');
   }
   trackingService = new TrackingService(pythonSidecar);
-  renderService = new RenderService(ffmpegRunner, { tracker: trackingService });
+  renderService = new RenderService(ffmpegRunner, {
+    tracker: trackingService,
+    videoEncoderArgs: resolvedVideoEncoderArgs ?? X264_VIDEO_ARGS,
+  });
   renderProgressUnsub = renderService.onProgress((p) => {
     const win = BrowserWindow.getAllWindows()[0];
     if (win && !win.isDestroyed()) {
@@ -641,6 +666,7 @@ void app.whenReady().then(() => {
           }
         }
 
+        await ensureVideoEncoderArgs();
         const service = getRenderService();
         const renderResult = await service.render({
           sourcePath: audioPath,

@@ -781,3 +781,88 @@ describe('RenderService with subtitles', () => {
     expect(run.mock.calls[0]![0].durationSec).toBe(15);
   });
 });
+
+describe('RenderService GPU (NVENC) encoder', () => {
+  // Local (no infra import from a service test) — only needs to contain an
+  // *_nvenc codec so RenderService treats it as the GPU encoder.
+  const NVENC_ARGS = ['-c:v', 'h264_nvenc', '-preset', 'p5', '-rc', 'vbr', '-cq', '23'];
+  let run: ReturnType<typeof vi.fn>;
+  let runner: { run: typeof run };
+  let writeFile: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    run = vi.fn();
+    runner = { run };
+    writeFile = vi.fn(async () => undefined);
+  });
+
+  it('uses injected NVENC video args (h264_nvenc + -cq, no libx264/-crf)', async () => {
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+    const svc = new RenderService(runner as never, {
+      fs: { writeFile } as never,
+      videoEncoderArgs: NVENC_ARGS,
+    });
+    const p = svc.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [fakeHighlight(1, 0, 30)],
+    });
+    h._resolve();
+    await p;
+    const args: string[] = run.mock.calls[0]![0].args;
+    expect(args).toContain('h264_nvenc');
+    expect(args).toContain('-cq');
+    expect(args).not.toContain('libx264');
+    expect(args).not.toContain('-crf');
+    expect(args).toContain('aac'); // encoder-agnostic tail preserved
+  });
+
+  it('falls back to libx264 and retries the clip when an NVENC render fails', async () => {
+    const fail = fakeRunHandle();
+    const ok = fakeRunHandle();
+    run.mockReturnValueOnce(fail).mockReturnValueOnce(ok);
+    const svc = new RenderService(runner as never, {
+      fs: { writeFile } as never,
+      videoEncoderArgs: NVENC_ARGS,
+    });
+    const p = svc.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [fakeHighlight(1, 0, 30)],
+    });
+    fail._reject('h264_nvenc: No NVENC capable devices found');
+    await new Promise((r) => setTimeout(r, 0));
+    ok._resolve();
+    const res = await p;
+    expect(run.mock.calls[0]![0].args).toContain('h264_nvenc'); // 1st = GPU attempt
+    expect(run.mock.calls[1]![0].args).toContain('libx264'); // retry = CPU
+    expect(run.mock.calls[1]![0].args).not.toContain('h264_nvenc');
+    expect(res.results[0]!.status).toBe('done');
+  });
+
+  it('stays on libx264 for subsequent clips after one NVENC failure', async () => {
+    const fail = fakeRunHandle();
+    const retry = fakeRunHandle();
+    const clip2 = fakeRunHandle();
+    run.mockReturnValueOnce(fail).mockReturnValueOnce(retry).mockReturnValueOnce(clip2);
+    const svc = new RenderService(runner as never, {
+      fs: { writeFile } as never,
+      videoEncoderArgs: NVENC_ARGS,
+    });
+    const p = svc.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [fakeHighlight(1, 0, 30), fakeHighlight(2, 40, 70)],
+    });
+    fail._reject('h264_nvenc init failed');
+    await new Promise((r) => setTimeout(r, 0));
+    retry._resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    clip2._resolve();
+    const res = await p;
+    expect(run.mock.calls[2]![0].args).toContain('libx264'); // clip 2 stays CPU
+    expect(run.mock.calls[2]![0].args).not.toContain('h264_nvenc');
+    expect(res.results.every((r) => r.status === 'done')).toBe(true);
+  });
+});
