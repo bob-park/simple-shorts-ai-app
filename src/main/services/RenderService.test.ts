@@ -143,13 +143,15 @@ describe('RenderService', () => {
     expect(args[args.indexOf('-i') + 1]).toBe('/tmp/in.mp4');
     expect(args).toContain('-vf');
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,5,35)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,5,35)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='short_1.ass'",
     );
     expect(args).toContain('-af');
     expect(args[args.indexOf('-af') + 1]).toBe("aselect='between(t,5,35)',asetpts=N/SR/TB");
     expect(args).toContain('libx264');
     expect(args).toContain('aac');
-    expect(args[args.length - 1]).toBe('/tmp/out/short_1.mp4');
+    // Output is a bare basename; the Korean/space-prone dir is the cwd only.
+    expect(args[args.length - 1]).toBe('short_1.mp4');
+    expect(opts.cwd).toBe('/tmp/out');
     // ASS file always written (title-only when no transcript words / options provided)
     expect(writeFile).toHaveBeenCalledTimes(1);
     expect(writeFile.mock.calls[0]![0]).toBe('/tmp/out/short_1.ass');
@@ -294,7 +296,7 @@ describe('RenderService with tracker', () => {
     const vfIndex = args.indexOf('-vf');
     expect(vfIndex).toBeGreaterThan(-1);
     expect(args[vfIndex + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,sendcmd=f='/tmp/out/short_1.cmd',crop@c=ih*3/4:ih:0:0,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,sendcmd=f='short_1.cmd',crop@c=ih*3/4:ih:0:0,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='short_1.ass'",
     );
 
     // RenderClipResult.tracking populated
@@ -327,7 +329,7 @@ describe('RenderService with tracker', () => {
     // Args use the static center crop with select filter
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='short_1.ass'",
     );
     expect(result.results[0]!.tracking).toBeNull();
     expect(result.results[0]!.status).toBe('done');
@@ -359,7 +361,7 @@ describe('RenderService with tracker', () => {
     expect(writePaths).toContain('/tmp/out/short_1.ass');
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='short_1.ass'",
     );
     expect(result.results[0]!.tracking).toBeNull();
     expect(result.results[0]!.status).toBe('done');
@@ -394,7 +396,7 @@ describe('RenderService with tracker', () => {
     expect(writePaths).toContain('/tmp/out/short_1.ass');
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='short_1.ass'",
     );
     expect(result.results[0]!.tracking).toBeNull();
     expect(result.results[0]!.status).toBe('done');
@@ -455,7 +457,7 @@ describe('RenderService with subtitles', () => {
     const args: string[] = run.mock.calls[0]![0].args;
     const vfIndex = args.indexOf('-vf');
     expect(args[vfIndex + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='short_1.ass'",
     );
 
     // RenderClipResult.subtitles populated
@@ -488,7 +490,7 @@ describe('RenderService with subtitles', () => {
 
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,0,30)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='short_1.ass'",
     );
     // RenderClipResult.subtitles → null because no word cues were emitted.
     expect(result.results[0]!.subtitles).toBeNull();
@@ -519,12 +521,12 @@ describe('RenderService with subtitles', () => {
 
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,100,130)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,100,130)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='short_1.ass'",
     );
     expect(result.results[0]!.subtitles).toBeNull();
   });
 
-  it('single-quotes the .ass path in the filter so paths with spaces work (macOS)', async () => {
+  it('keeps a spaced/Unicode output dir out of the filtergraph — basename in filter, dir as cwd', async () => {
     const writeFile = vi.fn(async (_path: string, _content: string, _enc?: string) => undefined);
     const fs = { writeFile };
     const service = new RenderService(runner as never, { fs: fs as never });
@@ -542,8 +544,13 @@ describe('RenderService with subtitles', () => {
     h._resolve();
     await promise;
 
-    const args: string[] = run.mock.calls[0]![0].args;
-    expect(args[args.indexOf('-vf') + 1]).toContain("subtitles=filename='/Users/Bob Smith/Movies/short_1.ass'");
+    const opts = run.mock.calls[0]![0];
+    expect(opts.args[opts.args.indexOf('-vf') + 1]).toContain("subtitles=filename='short_1.ass'");
+    expect(opts.args[opts.args.length - 1]).toBe('short_1.mp4');
+    // The space/Unicode-prone dir lives only as the ffmpeg cwd.
+    expect(opts.cwd).toBe('/Users/Bob Smith/Movies');
+    // fs writes still use the absolute path.
+    expect(writeFile.mock.calls[0]![0]).toBe('/Users/Bob Smith/Movies/short_1.ass');
   });
 
   it('retries clip without subtitles filter when ffmpeg lacks libass, then skips for subsequent clips', async () => {
@@ -623,7 +630,7 @@ describe('RenderService with subtitles', () => {
 
     const args: string[] = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('-vf') + 1]).toBe(
-      "select='between(t,5,8)+between(t,12,15)+between(t,30,33)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='/tmp/out/short_1.ass'",
+      "select='between(t,5,8)+between(t,12,15)+between(t,30,33)',setpts=N/FRAME_RATE/TB,crop=ih*3/4:ih,scale=1080:1280,pad=1080:1920:0:320:black,subtitles=filename='short_1.ass'",
     );
     expect(args[args.indexOf('-af') + 1]).toBe(
       "aselect='between(t,5,8)+between(t,12,15)+between(t,30,33)',asetpts=N/SR/TB",
@@ -772,5 +779,90 @@ describe('RenderService with subtitles', () => {
 
     // 3 segments × 5s = 15s
     expect(run.mock.calls[0]![0].durationSec).toBe(15);
+  });
+});
+
+describe('RenderService GPU (NVENC) encoder', () => {
+  // Local (no infra import from a service test) — only needs to contain an
+  // *_nvenc codec so RenderService treats it as the GPU encoder.
+  const NVENC_ARGS = ['-c:v', 'h264_nvenc', '-preset', 'p5', '-rc', 'vbr', '-cq', '23'];
+  let run: ReturnType<typeof vi.fn>;
+  let runner: { run: typeof run };
+  let writeFile: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    run = vi.fn();
+    runner = { run };
+    writeFile = vi.fn(async () => undefined);
+  });
+
+  it('uses injected NVENC video args (h264_nvenc + -cq, no libx264/-crf)', async () => {
+    const h = fakeRunHandle();
+    run.mockReturnValue(h);
+    const svc = new RenderService(runner as never, {
+      fs: { writeFile } as never,
+      videoEncoderArgs: NVENC_ARGS,
+    });
+    const p = svc.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [fakeHighlight(1, 0, 30)],
+    });
+    h._resolve();
+    await p;
+    const args: string[] = run.mock.calls[0]![0].args;
+    expect(args).toContain('h264_nvenc');
+    expect(args).toContain('-cq');
+    expect(args).not.toContain('libx264');
+    expect(args).not.toContain('-crf');
+    expect(args).toContain('aac'); // encoder-agnostic tail preserved
+  });
+
+  it('falls back to libx264 and retries the clip when an NVENC render fails', async () => {
+    const fail = fakeRunHandle();
+    const ok = fakeRunHandle();
+    run.mockReturnValueOnce(fail).mockReturnValueOnce(ok);
+    const svc = new RenderService(runner as never, {
+      fs: { writeFile } as never,
+      videoEncoderArgs: NVENC_ARGS,
+    });
+    const p = svc.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [fakeHighlight(1, 0, 30)],
+    });
+    fail._reject('h264_nvenc: No NVENC capable devices found');
+    await new Promise((r) => setTimeout(r, 0));
+    ok._resolve();
+    const res = await p;
+    expect(run.mock.calls[0]![0].args).toContain('h264_nvenc'); // 1st = GPU attempt
+    expect(run.mock.calls[1]![0].args).toContain('libx264'); // retry = CPU
+    expect(run.mock.calls[1]![0].args).not.toContain('h264_nvenc');
+    expect(res.results[0]!.status).toBe('done');
+  });
+
+  it('stays on libx264 for subsequent clips after one NVENC failure', async () => {
+    const fail = fakeRunHandle();
+    const retry = fakeRunHandle();
+    const clip2 = fakeRunHandle();
+    run.mockReturnValueOnce(fail).mockReturnValueOnce(retry).mockReturnValueOnce(clip2);
+    const svc = new RenderService(runner as never, {
+      fs: { writeFile } as never,
+      videoEncoderArgs: NVENC_ARGS,
+    });
+    const p = svc.render({
+      sourcePath: '/tmp/in.mp4',
+      outputDir: '/tmp/out',
+      highlights: [fakeHighlight(1, 0, 30), fakeHighlight(2, 40, 70)],
+    });
+    fail._reject('h264_nvenc init failed');
+    await new Promise((r) => setTimeout(r, 0));
+    retry._resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    clip2._resolve();
+    const res = await p;
+    expect(run.mock.calls[2]![0].args).toContain('libx264'); // clip 2 stays CPU
+    expect(run.mock.calls[2]![0].args).not.toContain('h264_nvenc');
+    expect(res.results.every((r) => r.status === 'done')).toBe(true);
   });
 });

@@ -11,7 +11,7 @@ import { buildSendcmd } from './SendcmdGenerator';
 import { DEFAULT_SUBTITLE_STYLE, type SubtitleStyle, buildAssFile } from './SubtitleGenerator';
 
 interface RunnerLike {
-  run(opts: { args: readonly string[]; durationSec: number }): {
+  run(opts: { args: readonly string[]; durationSec: number; cwd?: string }): {
     onProgress(cb: (f: number) => void): void;
     cancel(): void;
     done: Promise<void>;
@@ -29,6 +29,12 @@ export interface RenderServiceOptions {
   tracker?: TrackerLike;
   /** Injected for tests. Defaults to the real fs.promises. */
   fs?: FsLike;
+  /**
+   * Video-encoder ffmpeg args. Defaults to libx264 (CPU). main.ts passes
+   * NVENC args when the bundled ffmpeg's h264_nvenc probe succeeds; a
+   * runtime NVENC failure falls back to libx264 for the rest of the run.
+   */
+  videoEncoderArgs?: readonly string[];
 }
 
 export interface RenderOptions {
@@ -53,8 +59,10 @@ export class RenderService {
   private activeHandle: ReturnType<RunnerLike['run']> | null = null;
   private canceled = false;
   private subtitlesUnavailable = false;
+  private nvencFellBack = false;
   private readonly tracker?: TrackerLike;
   private readonly fs: FsLike;
+  private readonly videoEncoderArgs: readonly string[];
 
   constructor(
     private readonly runner: RunnerLike,
@@ -62,6 +70,7 @@ export class RenderService {
   ) {
     this.tracker = options.tracker;
     this.fs = options.fs ?? fsPromises;
+    this.videoEncoderArgs = options.videoEncoderArgs ?? LIBX264_VIDEO_ARGS;
   }
 
   onProgress(handler: ProgressHandler): () => void {
@@ -89,20 +98,36 @@ export class RenderService {
         results.push(this.buildClipResult(clipIndex, h, 'canceled', undefined, 'Render canceled'));
         continue;
       }
+      // Absolute paths — for the RenderClipResult / fs writes / history.
       const outputPath = join(opts.outputDir, `short_${clipIndex}.mp4`);
+      // Bare ASCII basenames — what ffmpeg actually sees. Combined with
+      // cwd=outputDir on the spawn, this keeps Windows paths containing
+      // spaces / Korean / drive-colons OUT of the parse-fragile inline
+      // filtergraph and the output argv (the root cause of the Windows
+      // "Error parsing filterchain … Invalid argument" render failure).
+      const outName = `short_${clipIndex}.mp4`;
+      const cmdName = `short_${clipIndex}.cmd`;
+      const assName = `short_${clipIndex}.ass`;
       const durationSec = h.segments.reduce((acc, s) => acc + (s.end_sec - s.start_sec), 0);
 
       const trackingInfo = this.tracker ? await this.maybeTrackAndPersist(opts, h, clipIndex) : null;
-      const baseArgs =
-        trackingInfo !== null
-          ? buildTrackedArgs(opts.sourcePath, h.segments, outputPath, trackingInfo.cmdPath)
-          : buildCenterArgs(opts.sourcePath, h.segments, outputPath);
       // ASS file is always written — it carries the title-bar text even when
       // no transcript words / no subtitleOptions are provided.
       const assInfo = await this.writeAssFile(opts, h, clipIndex, durationSec);
-      const args = this.subtitlesUnavailable
-        ? baseArgs
-        : appendSubtitleFilter(baseArgs, assInfo.assPath);
+      const assemble = (videoArgs: readonly string[]): { baseArgs: string[]; args: string[] } => {
+        const base =
+          trackingInfo !== null
+            ? buildTrackedArgs(opts.sourcePath, h.segments, outName, cmdName, videoArgs)
+            : buildCenterArgs(opts.sourcePath, h.segments, outName, videoArgs);
+        return {
+          baseArgs: base,
+          args: this.subtitlesUnavailable ? base : appendSubtitleFilter(base, assName),
+        };
+      };
+      // Content check (not reference identity): the configured encoder is a
+      // GPU one iff it actually requests an *_nvenc codec.
+      const usingNvenc = !this.nvencFellBack && this.videoEncoderArgs.some((a) => a.includes('nvenc'));
+      let { baseArgs, args } = assemble(usingNvenc ? this.videoEncoderArgs : LIBX264_VIDEO_ARGS);
       // For the user-facing RenderClipResult.subtitles field, only report a
       // populated subtitles record when at least one word cue was emitted AND
       // the filter was actually applied. A title-only ASS (cues=0) or a
@@ -110,7 +135,7 @@ export class RenderService {
       const reportedSubtitles =
         !this.subtitlesUnavailable && assInfo.cues > 0 ? assInfo : null;
 
-      const handle = this.runner.run({ args, durationSec });
+      const handle = this.runner.run({ args, durationSec, cwd: opts.outputDir });
       this.activeHandle = handle;
       handle.onProgress((fraction) => {
         for (const cb of this.progressHandlers) {
@@ -137,7 +162,7 @@ export class RenderService {
         } else if (!this.subtitlesUnavailable && /No such filter: ['"]subtitles['"]/.test(message)) {
           this.subtitlesUnavailable = true;
           this.activeHandle = null;
-          const retryHandle = this.runner.run({ args: baseArgs, durationSec });
+          const retryHandle = this.runner.run({ args: baseArgs, durationSec, cwd: opts.outputDir });
           this.activeHandle = retryHandle;
           retryHandle.onProgress((fraction) => {
             for (const cb of this.progressHandlers) {
@@ -155,6 +180,38 @@ export class RenderService {
                 undefined,
                 trackingInfo ? { frames: trackingInfo.frameCount, trackPath: trackingInfo.trackPath } : null,
                 null,
+              ),
+            );
+          } catch (retryErr: unknown) {
+            const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+            results.push(this.buildClipResult(clipIndex, h, 'failed', undefined, retryMsg));
+          }
+        } else if (usingNvenc && !this.nvencFellBack) {
+          // NVENC failed at run time (driver / session limit / codec). Fall
+          // back to libx264 for this and all subsequent clips, retry once.
+          this.nvencFellBack = true;
+          this.activeHandle = null;
+          const cpu = assemble(LIBX264_VIDEO_ARGS);
+          baseArgs = cpu.baseArgs;
+          args = cpu.args;
+          const retryHandle = this.runner.run({ args, durationSec, cwd: opts.outputDir });
+          this.activeHandle = retryHandle;
+          retryHandle.onProgress((fraction) => {
+            for (const cb of this.progressHandlers) {
+              cb({ clipIndex, clipTotal: total, fraction });
+            }
+          });
+          try {
+            await retryHandle.done;
+            results.push(
+              this.buildClipResult(
+                clipIndex,
+                h,
+                'done',
+                outputPath,
+                undefined,
+                trackingInfo ? { frames: trackingInfo.frameCount, trackPath: trackingInfo.trackPath } : null,
+                reportedSubtitles,
               ),
             );
           } catch (retryErr: unknown) {
@@ -259,20 +316,14 @@ export class RenderService {
   }
 }
 
-const COMMON_ENCODE_ARGS = [
-  '-c:v',
-  'libx264',
-  '-preset',
-  'fast',
-  '-crf',
-  '23',
-  '-c:a',
-  'aac',
-  '-b:a',
-  '128k',
-  '-progress',
-  'pipe:2',
-];
+// The video encoder args are chosen per-run (libx264 vs h264_nvenc) and
+// passed into the arg builders; everything after them is encoder-agnostic.
+// Default CPU encoder + the NVENC runtime-fallback target. Defined locally so
+// this service has no dependency on the infra layer (composition root /
+// main.ts owns the NVENC choice and injects it via videoEncoderArgs).
+const LIBX264_VIDEO_ARGS = ['-c:v', 'libx264', '-preset', 'fast', '-crf', '23'];
+
+const COMMON_TAIL_ARGS = ['-c:a', 'aac', '-b:a', '128k', '-progress', 'pipe:2'];
 
 function buildSelectExpr(segments: HighlightSegment[]): string {
   return segments.map((s) => `between(t,${s.start_sec},${s.end_sec})`).join('+');
@@ -313,7 +364,12 @@ function buildAfChain(segments: HighlightSegment[]): string {
   return `aselect='${buildSelectExpr(segments)}',asetpts=N/SR/TB`;
 }
 
-function buildCenterArgs(sourcePath: string, segments: HighlightSegment[], outputPath: string): string[] {
+function buildCenterArgs(
+  sourcePath: string,
+  segments: HighlightSegment[],
+  outputPath: string,
+  videoArgs: readonly string[],
+): string[] {
   return [
     '-y',
     '-i',
@@ -322,7 +378,8 @@ function buildCenterArgs(sourcePath: string, segments: HighlightSegment[], outpu
     buildVfChain(segments, CROP_CENTER_EXPR),
     '-af',
     buildAfChain(segments),
-    ...COMMON_ENCODE_ARGS,
+    ...videoArgs,
+    ...COMMON_TAIL_ARGS,
     outputPath,
   ];
 }
@@ -332,6 +389,7 @@ function buildTrackedArgs(
   segments: HighlightSegment[],
   outputPath: string,
   cmdPath: string,
+  videoArgs: readonly string[],
 ): string[] {
   const cropClause = `sendcmd=f=${ffmpegFilterValue(cmdPath)},${CROP_TRACKED_RHS}`;
   return [
@@ -342,7 +400,8 @@ function buildTrackedArgs(
     buildVfChain(segments, cropClause),
     '-af',
     buildAfChain(segments),
-    ...COMMON_ENCODE_ARGS,
+    ...videoArgs,
+    ...COMMON_TAIL_ARGS,
     outputPath,
   ];
 }

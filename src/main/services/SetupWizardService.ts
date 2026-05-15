@@ -1,8 +1,10 @@
 import type { SetupProgress, SetupStatus } from '@shared/setup';
 import type { ChildProcess } from 'node:child_process';
+import { join } from 'node:path';
 
 interface FsLike {
   access: (path: string) => Promise<void>;
+  writeFile: (path: string, data: string) => Promise<void>;
 }
 
 type SpawnLike = (command: string, args: readonly string[], options?: Record<string, unknown>) => ChildProcess;
@@ -28,6 +30,15 @@ export interface SetupWizardOptions {
    * `--extra-index-url` directive there.
    */
   extraIndexUrls?: readonly string[];
+  /**
+   * Optional PEP-508 spec written to a uv `--overrides` file so it FORCES a
+   * package version regardless of the pin in requirements.txt (no resolution
+   * conflict — that's what overrides are for). Used for the EXPERIMENTAL
+   * NVIDIA path: requirements.txt pins the CPU-safe `llama-cpp-python==0.3.19`
+   * (the Problem-A corrupt-wheel guard), but an NVIDIA box overrides it to
+   * the CUDA `==0.3.23` from the cu124 index. Absent on the default path.
+   */
+  llamaCudaOverrideSpec?: string;
   spawn: SpawnLike;
   fs: FsLike;
 }
@@ -46,9 +57,28 @@ export class SetupWizardService {
 
   constructor(private readonly opts: SetupWizardOptions) {}
 
+  private get sentinelPath(): string {
+    return join(this.opts.venvPath, '.stt-selftest-ok');
+  }
+
+  /**
+   * Imports the STT runtime (faster_whisper / ctranslate2 / av) in the venv
+   * python to fail fast at setup time instead of mid-job. Called by `run()`
+   * after pip install; `run()` (not this method) writes the success sentinel,
+   * so calling `selfTest()` standalone never marks setup ready.
+   */
+  async selfTest(): Promise<void> {
+    await this.spawnAndWait(
+      this.opts.venvPythonBinary,
+      ['-c', 'import faster_whisper, ctranslate2, av; print("stt-ok")'],
+      'selftest',
+    );
+  }
+
   async status(): Promise<SetupStatus> {
     try {
       await this.opts.fs.access(this.opts.venvPythonBinary);
+      await this.opts.fs.access(this.sentinelPath);
       return 'ready';
     } catch {
       return 'pending';
@@ -73,12 +103,21 @@ export class SetupWizardService {
       '--extra-index-url',
       url,
     ]);
+    // EXPERIMENTAL NVIDIA path: force the CUDA llama-cpp-python via a uv
+    // --overrides file (venv exists now, post `uv venv`). No-op by default.
+    let overrideArgs: string[] = [];
+    if (this.opts.llamaCudaOverrideSpec) {
+      const overridePath = join(this.opts.venvPath, '.llama-override.txt');
+      await this.opts.fs.writeFile(overridePath, `${this.opts.llamaCudaOverrideSpec}\n`);
+      overrideArgs = ['--overrides', overridePath];
+    }
     await this.spawnAndWait(
       this.opts.uvBinary,
       [
         'pip',
         'install',
         ...extraIndexArgs,
+        ...overrideArgs,
         '--python',
         this.opts.venvPythonBinary,
         '-r',
@@ -86,9 +125,11 @@ export class SetupWizardService {
       ],
       'pip',
     );
+    await this.selfTest();
+    await this.opts.fs.writeFile(this.sentinelPath, 'ok');
   }
 
-  private spawnAndWait(cmd: string, args: string[], phase: 'venv' | 'pip'): Promise<void> {
+  private spawnAndWait(cmd: string, args: string[], phase: 'venv' | 'pip' | 'selftest'): Promise<void> {
     return new Promise((resolveP, rejectP) => {
       const child = this.opts.spawn(cmd, args, {});
       let stderrTail = '';

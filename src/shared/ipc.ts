@@ -87,6 +87,8 @@ export interface AppApi {
   revealInFolder(absolutePath: string): Promise<void>;
   /** Open a file with the OS default app (e.g., transcript.json → text editor). */
   openPath(absolutePath: string): Promise<void>;
+  /** Reveal the sidecar log file in the OS file manager. */
+  openLogsFolder(): Promise<void>;
 }
 
 declare global {

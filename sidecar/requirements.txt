@@ -7,7 +7,15 @@
 faster-whisper>=1.0.3
 mediapipe>=0.10.18
 opencv-python>=4.10
-llama-cpp-python>=0.3.22
+# PINNED — do not float. The abetlen-prebuilt CPU wheels (index passed via
+# SetupWizardService --extra-index-url) for 0.3.21/0.3.22/0.3.23 ship a CORRUPT
+# `py3-none-macosx_11_0_arm64` wheel: it downloads byte-exact to GitHub's
+# recorded size but fails zip/deflate extraction (`deflate decompression error:
+# invalid block type`), crashing `uv pip install` during first-run setup on
+# macOS. 0.3.19 is the newest version with VALID abetlen wheels for BOTH
+# macosx_11_0_arm64 and win_amd64 (cp311); its bundled llama.cpp still has full
+# Gemma 3 support (we load gemma-3-4b-it). See sidecarRequirements.test.ts.
+llama-cpp-python==0.3.19
 huggingface-hub==0.26.5
 
 # CUDA runtime libraries — required by CTranslate2 (for Whisper GPU) and by

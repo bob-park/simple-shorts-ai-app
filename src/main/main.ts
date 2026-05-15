@@ -14,11 +14,14 @@ import { promisify } from 'node:util';
 import youtubeDl from 'youtube-dl-exec';
 
 import { FfmpegRunner } from './infra/FfmpegRunner';
+import { nvidiaGpuPresent } from './infra/GpuProbe';
 import { HistoryRepo } from './infra/HistoryRepo';
+import { NVENC_VIDEO_ARGS, X264_VIDEO_ARGS, nvencAvailable } from './infra/HwEncoder';
 import { PythonSidecar } from './infra/PythonSidecar';
-import { resolveRuntimePaths as resolveRuntimePathsImpl, type RuntimePaths } from './infra/runtimePaths';
 import { SettingsStore } from './infra/SettingsStore';
 import { SidecarLlmClient } from './infra/SidecarLlmClient';
+import { SidecarLogger } from './infra/SidecarLogger';
+import { type RuntimePaths, resolveRuntimePaths as resolveRuntimePathsImpl } from './infra/runtimePaths';
 import { HighlightService } from './services/HighlightService';
 import { HistoryService } from './services/HistoryService';
 import { RenderService } from './services/RenderService';
@@ -172,6 +175,17 @@ function createMainWindow(): BrowserWindow {
   return win;
 }
 
+let sidecarLogger: SidecarLogger | null = null;
+function getSidecarLogger(): SidecarLogger {
+  if (sidecarLogger) return sidecarLogger;
+  sidecarLogger = new SidecarLogger(join(app.getPath('userData'), 'logs', 'sidecar.log'));
+  return sidecarLogger;
+}
+function logSidecarFailure(stage: string, fileLabel: string, e: unknown): void {
+  const message = e instanceof Error ? e.message : String(e);
+  getSidecarLogger().append(`[${new Date().toISOString()}] ${stage} failed (${fileLabel}): ${message}\n`);
+}
+
 function getTranscribeService(): TranscribeService {
   if (transcribeService) return transcribeService;
   const paths = resolveRuntimePaths();
@@ -182,6 +196,7 @@ function getTranscribeService(): TranscribeService {
     args: paths.sidecarSpawn.args,
     cwd: paths.sidecarCwd,
     env: { HF_HOME: modelsDir, ...paths.sidecarEnv },
+    logSink: getSidecarLogger().sink,
   });
   transcribeService = new TranscribeService(pythonSidecar);
 
@@ -217,6 +232,55 @@ function getHighlightService(): HighlightService {
   return highlightService;
 }
 
+let resolvedVideoEncoderArgs: readonly string[] | null = null;
+/**
+ * Resolve the ffmpeg video encoder ONCE per process: probe the bundled
+ * ffmpeg for a working `h264_nvenc` (NVIDIA HW-accelerated encode) and cache
+ * NVENC args if the probe succeeds, else libx264. RenderService additionally
+ * falls back to libx264 at run time if a real NVENC encode fails.
+ */
+async function ensureVideoEncoderArgs(): Promise<readonly string[]> {
+  if (resolvedVideoEncoderArgs) return resolvedVideoEncoderArgs;
+  const paths = resolveRuntimePaths();
+  const ffmpegCmd = existsSync(paths.ffmpegBinary) ? paths.ffmpegBinary : 'ffmpeg';
+  const nvenc = await nvencAvailable({ ffmpegCmd, spawn });
+  resolvedVideoEncoderArgs = nvenc ? NVENC_VIDEO_ARGS : X264_VIDEO_ARGS;
+  getSidecarLogger().append(
+    `[${new Date().toISOString()}] render: video encoder = ${
+      nvenc ? 'h264_nvenc (NVIDIA HW accel)' : 'libx264 (CPU; no usable NVENC)'
+    }\n`,
+  );
+  return resolvedVideoEncoderArgs;
+}
+
+const LLAMA_CPU_INDEX = 'https://abetlen.github.io/llama-cpp-python/whl/cpu';
+const LLAMA_CUDA_INDEX = 'https://abetlen.github.io/llama-cpp-python/whl/cu124';
+const LLAMA_CUDA_OVERRIDE_SPEC = 'llama-cpp-python==0.3.23';
+let resolvedLlamaIndex: string | null = null;
+let resolvedLlamaCudaOverrideSpec: string | undefined;
+/**
+ * Decide the llama-cpp-python wheel ONCE per process. Default = the CPU
+ * build pinned `==0.3.19` (via requirements.txt; the Problem-A corrupt-wheel
+ * guard). EXPERIMENTAL: if an NVIDIA GPU is detected, switch to the cu124
+ * CUDA index and force `==0.3.23` via a uv --overrides file. This is gated
+ * so non-NVIDIA / macOS users are completely unaffected; lazy `llama_cpp`
+ * import (llm_engine.py) still contains any CUDA-load failure to chat().
+ * Whether cu124 (CUDA 12.4) actually runs on a Blackwell sm_120 GPU depends
+ * on the wheel shipping forward-compatible PTX — unverifiable here; the
+ * user's machine + sidecar.log are the oracle.
+ */
+async function ensureLlamaWheelPlan(): Promise<void> {
+  if (resolvedLlamaIndex) return;
+  const hasNvidia = await nvidiaGpuPresent({ spawn });
+  resolvedLlamaIndex = hasNvidia ? LLAMA_CUDA_INDEX : LLAMA_CPU_INDEX;
+  resolvedLlamaCudaOverrideSpec = hasNvidia ? LLAMA_CUDA_OVERRIDE_SPEC : undefined;
+  getSidecarLogger().append(
+    `[${new Date().toISOString()}] setup: llama-cpp-python = ${
+      hasNvidia ? 'EXPERIMENTAL CUDA cu124 (==0.3.23) — NVIDIA GPU detected' : 'CPU (==0.3.19, requirements pin)'
+    }\n`,
+  );
+}
+
 function getRenderService(): RenderService {
   if (renderService) return renderService;
   const paths = resolveRuntimePaths();
@@ -238,7 +302,10 @@ function getRenderService(): RenderService {
     throw new Error('PythonSidecar failed to initialise');
   }
   trackingService = new TrackingService(pythonSidecar);
-  renderService = new RenderService(ffmpegRunner, { tracker: trackingService });
+  renderService = new RenderService(ffmpegRunner, {
+    tracker: trackingService,
+    videoEncoderArgs: resolvedVideoEncoderArgs ?? X264_VIDEO_ARGS,
+  });
   renderProgressUnsub = renderService.onProgress((p) => {
     const win = BrowserWindow.getAllWindows()[0];
     if (win && !win.isDestroyed()) {
@@ -262,10 +329,10 @@ function getHistoryService(): HistoryService {
     ffmpegRunner = new FfmpegRunner({
       spawn,
       // existsSync filters out the 'ffmpeg' PATH-name string (which is not an
-    // absolute path) and keeps the bundled libass-enabled binary when present
-    // — required in BOTH dev and packaged mode because Homebrew's ffmpeg is
-    // built without --enable-libass and would silently drop `subtitles=`.
-    command: existsSync(paths.ffmpegBinary) ? paths.ffmpegBinary : 'ffmpeg',
+      // absolute path) and keeps the bundled libass-enabled binary when present
+      // — required in BOTH dev and packaged mode because Homebrew's ffmpeg is
+      // built without --enable-libass and would silently drop `subtitles=`.
+      command: existsSync(paths.ffmpegBinary) ? paths.ffmpegBinary : 'ffmpeg',
     });
   }
   const thumbnails = new ThumbnailService(ffmpegRunner);
@@ -286,17 +353,13 @@ function getResumeService(): ResumeService {
 function getSetupWizard(): SetupWizardService {
   if (setupWizard) return setupWizard;
   const paths = resolveRuntimePaths();
-  // llama-cpp-python's whl/cu124 wheel does NOT fall back to CPU cleanly —
-  // when the .pyd loads, it eagerly probes the NVIDIA driver, and on a
-  // machine without one the very `from llama_cpp import Llama` (top-level
-  // in llm_engine.py) crashes the sidecar with exit code 1 before STT can
-  // even run. Until we add a first-launch GPU-detect step that conditionally
-  // picks cu124 vs cpu, pin the CPU build on every platform. Whisper GPU
-  // (via faster-whisper + ctranslate2) is separately gated by the user's
-  // settings.whisper.device choice and the NVIDIA bundle in requirements.txt,
-  // so this rollback doesn't affect it. LLM GPU acceleration is deferred to
-  // a future milestone.
-  const llmWheelIndex = 'https://abetlen.github.io/llama-cpp-python/whl/cpu';
+  // llama-cpp-python wheel: CPU by default (requirements pins ==0.3.19 — the
+  // Problem-A corrupt-wheel guard). The EXPERIMENTAL NVIDIA path (cu124 +
+  // ==0.3.23 override) is selected by ensureLlamaWheelPlan(), which the
+  // setup:run handler resolves (and rebuilds this wizard) before run().
+  // Falls back to the CPU index if the plan hasn't resolved yet (e.g. a
+  // setup:status call before setup:run constructs the wizard).
+  const llmWheelIndex = resolvedLlamaIndex ?? LLAMA_CPU_INDEX;
   setupWizard = new SetupWizardService({
     uvBinary: paths.uvBinary,
     pythonRuntime: paths.pythonRuntime,
@@ -304,8 +367,9 @@ function getSetupWizard(): SetupWizardService {
     venvPythonBinary: paths.venvPythonBinary,
     requirementsPath: paths.requirementsPath,
     extraIndexUrls: [llmWheelIndex],
+    llamaCudaOverrideSpec: resolvedLlamaCudaOverrideSpec,
     spawn,
-    fs: { access: fsPromises.access },
+    fs: { access: fsPromises.access, writeFile: fsPromises.writeFile },
   });
   setupWizard.onProgress((p) => {
     const win = BrowserWindow.getAllWindows()[0];
@@ -394,57 +458,59 @@ void app.whenReady().then(() => {
 
   ipcMain.handle('youtube:fetchPreview', (_e, url: string) => youtubeService.fetchMeta(url));
 
-  ipcMain.handle('youtube:download', (_e, url: string) => withPowerSaveBlocker(async () => {
-    // Synchronous lock: prevents a second invocation from passing the guard
-    // while we await fetchMeta below (the activeDownload assignment was async).
-    if (activeDownload || downloadStarting) {
-      throw new Error('A download is already in progress');
-    }
-    downloadStarting = true;
-    let handle: DownloadHandle | null = null;
-    let metaTitle = '';
-    try {
-      const settings = settingsStore.get();
-      const meta = await youtubeService.fetchMeta(url);
-      metaTitle = meta.title;
-      // Filename = sanitized title (max 20 chars), with the video id as a
-      // safety fallback if sanitization strips the title to nothing.
-      const stem = sanitizeFilename(meta.title, 20) || meta.id;
-      const outputStem = join(settings.paths.downloads, stem);
-      handle = youtubeService.download(url, outputStem, { videoId: meta.id });
-      activeDownload = handle;
-      downloadStarting = false; // handle now owns the lock
-      handle.onProgress((p) => {
-        const win = BrowserWindow.getAllWindows()[0];
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('download:progress', p);
-        }
-      });
-      const result = await handle.done;
-      // M9: persist the video metadata next to the source so render can build
-      // a history row. Keep it sibling to the .transcript.json / .highlights.json
-      // artifacts the later milestones already write.
-      try {
-        const metaPath = `${result.outputPath}.meta.json`;
-        await fsPromises.writeFile(
-          metaPath,
-          JSON.stringify({ ...meta, url, downloadedAt: new Date().toISOString() }, null, 2),
-          'utf8',
-        );
-      } catch (e) {
-        // Non-fatal — history record will fall back to a stub if missing.
-        process.stderr.write(`[m9] failed to write meta.json: ${(e as Error).message}\n`);
+  ipcMain.handle('youtube:download', (_e, url: string) =>
+    withPowerSaveBlocker(async () => {
+      // Synchronous lock: prevents a second invocation from passing the guard
+      // while we await fetchMeta below (the activeDownload assignment was async).
+      if (activeDownload || downloadStarting) {
+        throw new Error('A download is already in progress');
       }
-      notifyStageComplete('다운로드 완료', metaTitle || basename(result.outputPath));
-      return { outputPath: result.outputPath };
-    } catch (e) {
-      notifyStageComplete('다운로드 실패', `${metaTitle ? `${metaTitle}: ` : ''}${(e as Error).message}`);
-      throw e;
-    } finally {
-      activeDownload = null;
-      downloadStarting = false; // also clears on early throw before handle was set
-    }
-  }));
+      downloadStarting = true;
+      let handle: DownloadHandle | null = null;
+      let metaTitle = '';
+      try {
+        const settings = settingsStore.get();
+        const meta = await youtubeService.fetchMeta(url);
+        metaTitle = meta.title;
+        // Filename = sanitized title (max 20 chars), with the video id as a
+        // safety fallback if sanitization strips the title to nothing.
+        const stem = sanitizeFilename(meta.title, 20) || meta.id;
+        const outputStem = join(settings.paths.downloads, stem);
+        handle = youtubeService.download(url, outputStem, { videoId: meta.id });
+        activeDownload = handle;
+        downloadStarting = false; // handle now owns the lock
+        handle.onProgress((p) => {
+          const win = BrowserWindow.getAllWindows()[0];
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('download:progress', p);
+          }
+        });
+        const result = await handle.done;
+        // M9: persist the video metadata next to the source so render can build
+        // a history row. Keep it sibling to the .transcript.json / .highlights.json
+        // artifacts the later milestones already write.
+        try {
+          const metaPath = `${result.outputPath}.meta.json`;
+          await fsPromises.writeFile(
+            metaPath,
+            JSON.stringify({ ...meta, url, downloadedAt: new Date().toISOString() }, null, 2),
+            'utf8',
+          );
+        } catch (e) {
+          // Non-fatal — history record will fall back to a stub if missing.
+          process.stderr.write(`[m9] failed to write meta.json: ${(e as Error).message}\n`);
+        }
+        notifyStageComplete('다운로드 완료', metaTitle || basename(result.outputPath));
+        return { outputPath: result.outputPath };
+      } catch (e) {
+        notifyStageComplete('다운로드 실패', `${metaTitle ? `${metaTitle}: ` : ''}${(e as Error).message}`);
+        throw e;
+      } finally {
+        activeDownload = null;
+        downloadStarting = false; // also clears on early throw before handle was set
+      }
+    }),
+  );
 
   ipcMain.handle('youtube:cancel', () => {
     activeDownload?.cancel();
@@ -454,34 +520,36 @@ void app.whenReady().then(() => {
     shell.showItemInFolder(absolutePath);
   });
 
-  ipcMain.handle('transcribe:run', (_e, audioPath: string) => withPowerSaveBlocker(async () => {
-    const fileLabel = basename(audioPath);
-    try {
-      const service = getTranscribeService();
-      const settings = settingsStore.get();
-      // Resolve 'auto' to a concrete device per platform. On Windows we don't
-      // ship the NVIDIA CUDA stack, so faster-whisper's default 'auto' would
-      // probe CUDA, try to LoadLibrary("cublas64_12.dll"), and fail at the
-      // first encode call. Pin it to 'cpu' so the CUDA path is skipped
-      // entirely. mac/Linux 'auto' resolves naturally (no CUDA on mac;
-      // Linux behaves the same as Windows but we don't ship there yet).
-      const requestedDevice = settings.whisper.device;
-      const device =
-        process.platform === 'win32' && requestedDevice === 'auto' ? 'cpu' : requestedDevice;
-      const transcript = await service.transcribe(audioPath, {
-        model: settings.whisper.model,
-        language: settings.whisper.language,
-        device,
-      });
-      const transcriptPath = `${audioPath}.transcript.json`;
-      await fsPromises.writeFile(transcriptPath, JSON.stringify(transcript, null, 2), 'utf8');
-      notifyStageComplete('자막 추출 완료', fileLabel);
-      return { transcriptPath, transcript };
-    } catch (e) {
-      notifyStageComplete('자막 추출 실패', `${fileLabel}: ${(e as Error).message}`);
-      throw e;
-    }
-  }));
+  ipcMain.handle('transcribe:run', (_e, audioPath: string) =>
+    withPowerSaveBlocker(async () => {
+      const fileLabel = basename(audioPath);
+      try {
+        const service = getTranscribeService();
+        const settings = settingsStore.get();
+        // Resolve 'auto' to a concrete device per platform. On Windows we don't
+        // ship the NVIDIA CUDA stack, so faster-whisper's default 'auto' would
+        // probe CUDA, try to LoadLibrary("cublas64_12.dll"), and fail at the
+        // first encode call. Pin it to 'cpu' so the CUDA path is skipped
+        // entirely. mac/Linux 'auto' resolves naturally (no CUDA on mac;
+        // Linux behaves the same as Windows but we don't ship there yet).
+        const requestedDevice = settings.whisper.device;
+        const device = process.platform === 'win32' && requestedDevice === 'auto' ? 'cpu' : requestedDevice;
+        const transcript = await service.transcribe(audioPath, {
+          model: settings.whisper.model,
+          language: settings.whisper.language,
+          device,
+        });
+        const transcriptPath = `${audioPath}.transcript.json`;
+        await fsPromises.writeFile(transcriptPath, JSON.stringify(transcript, null, 2), 'utf8');
+        notifyStageComplete('자막 추출 완료', fileLabel);
+        return { transcriptPath, transcript };
+      } catch (e) {
+        logSidecarFailure('transcribe', fileLabel, e);
+        notifyStageComplete('자막 추출 실패', `${fileLabel}: ${(e as Error).message}`);
+        throw e;
+      }
+    }),
+  );
 
   ipcMain.handle('transcribe:cancel', async () => {
     if (transcribeService) await transcribeService.cancel();
@@ -496,57 +564,64 @@ void app.whenReady().then(() => {
     await shell.openPath(absolutePath);
   });
 
-  ipcMain.handle('extract:run', (_e, audioPath: string) => withPowerSaveBlocker(async () => {
-    if (extractInFlight) {
-      throw new Error('An extraction is already in progress');
-    }
-    extractInFlight = true;
-    const fileLabel = basename(audioPath);
-    try {
-      const transcriptPath = `${audioPath}.transcript.json`;
-      const transcriptRaw = await fsPromises.readFile(transcriptPath, 'utf8');
-      const transcript = TranscriptSchema.parse(JSON.parse(transcriptRaw));
+  ipcMain.handle('logs:openFolder', () => {
+    shell.showItemInFolder(join(app.getPath('userData'), 'logs', 'sidecar.log'));
+  });
 
-      const service = getHighlightService();
-
-      // Download model on demand if not yet present.
-      const status = await sidecarLlmClient!.modelStatus();
-      if (!status.exists) {
-        await fsPromises.mkdir(join(app.getPath('userData'), LLM_MODEL_DIR), { recursive: true });
-        await sidecarLlmClient!.downloadModel({ repo: LLM_MODEL_REPO, filename: LLM_MODEL_FILENAME }, (p) => {
-          const win = BrowserWindow.getAllWindows()[0];
-          if (win && !win.isDestroyed()) {
-            win.webContents.send('extract:progress', {
-              jobId: audioPath,
-              chunkIndex: 0,
-              chunkTotal: 0,
-              phase: 'download' as const,
-              downloadedBytes: p.processed,
-              totalBytes: p.total,
-            });
-          }
-        });
+  ipcMain.handle('extract:run', (_e, audioPath: string) =>
+    withPowerSaveBlocker(async () => {
+      if (extractInFlight) {
+        throw new Error('An extraction is already in progress');
       }
+      extractInFlight = true;
+      const fileLabel = basename(audioPath);
+      try {
+        const transcriptPath = `${audioPath}.transcript.json`;
+        const transcriptRaw = await fsPromises.readFile(transcriptPath, 'utf8');
+        const transcript = TranscriptSchema.parse(JSON.parse(transcriptRaw));
 
-      const settings = settingsStore.get();
-      const highlightSet = await service.extract({
-        transcript,
-        audioPath,
-        count: settings.shorts.defaultCount,
-        minSec: settings.shorts.minSec,
-        maxSec: settings.shorts.maxSec,
-      });
-      const highlightsPath = `${audioPath}.highlights.json`;
-      await fsPromises.writeFile(highlightsPath, JSON.stringify(highlightSet, null, 2), 'utf8');
-      notifyStageComplete('하이라이트 추출 완료', `${fileLabel} · ${highlightSet.highlights.length}개`);
-      return { highlightsPath, highlightSet };
-    } catch (e) {
-      notifyStageComplete('하이라이트 추출 실패', `${fileLabel}: ${(e as Error).message}`);
-      throw e;
-    } finally {
-      extractInFlight = false;
-    }
-  }));
+        const service = getHighlightService();
+
+        // Download model on demand if not yet present.
+        const status = await sidecarLlmClient!.modelStatus();
+        if (!status.exists) {
+          await fsPromises.mkdir(join(app.getPath('userData'), LLM_MODEL_DIR), { recursive: true });
+          await sidecarLlmClient!.downloadModel({ repo: LLM_MODEL_REPO, filename: LLM_MODEL_FILENAME }, (p) => {
+            const win = BrowserWindow.getAllWindows()[0];
+            if (win && !win.isDestroyed()) {
+              win.webContents.send('extract:progress', {
+                jobId: audioPath,
+                chunkIndex: 0,
+                chunkTotal: 0,
+                phase: 'download' as const,
+                downloadedBytes: p.processed,
+                totalBytes: p.total,
+              });
+            }
+          });
+        }
+
+        const settings = settingsStore.get();
+        const highlightSet = await service.extract({
+          transcript,
+          audioPath,
+          count: settings.shorts.defaultCount,
+          minSec: settings.shorts.minSec,
+          maxSec: settings.shorts.maxSec,
+        });
+        const highlightsPath = `${audioPath}.highlights.json`;
+        await fsPromises.writeFile(highlightsPath, JSON.stringify(highlightSet, null, 2), 'utf8');
+        notifyStageComplete('하이라이트 추출 완료', `${fileLabel} · ${highlightSet.highlights.length}개`);
+        return { highlightsPath, highlightSet };
+      } catch (e) {
+        logSidecarFailure('extract', fileLabel, e);
+        notifyStageComplete('하이라이트 추출 실패', `${fileLabel}: ${(e as Error).message}`);
+        throw e;
+      } finally {
+        extractInFlight = false;
+      }
+    }),
+  );
 
   ipcMain.handle('extract:cancel', () => {
     // M11: local LLM chat is uncancellable once dispatched.
@@ -576,95 +651,99 @@ void app.whenReady().then(() => {
     return sidecarLlmClient.modelStatus();
   });
 
-  ipcMain.handle('render:run', (_e, audioPath: string) => withPowerSaveBlocker(async () => {
-    if (renderInFlight) {
-      throw new Error('A render is already in progress');
-    }
-    renderInFlight = true;
-    const fileLabel = basename(audioPath);
-    try {
-      const highlightsPath = `${audioPath}.highlights.json`;
-      let raw: string;
-      try {
-        raw = await fsPromises.readFile(highlightsPath, 'utf8');
-      } catch (e: unknown) {
-        const code = (e as NodeJS.ErrnoException).code;
-        if (code === 'ENOENT') {
-          throw new Error(`No highlights found at ${highlightsPath}`);
-        }
-        throw e;
+  ipcMain.handle('render:run', (_e, audioPath: string) =>
+    withPowerSaveBlocker(async () => {
+      if (renderInFlight) {
+        throw new Error('A render is already in progress');
       }
-      const highlightSet = HighlightSetSchema.parse(JSON.parse(raw));
-
-      const settings = settingsStore.get();
-      const sourceStem = basename(audioPath, extname(audioPath));
-      const outputDir = join(settings.paths.outputs, sourceStem);
-      await fsPromises.mkdir(outputDir, { recursive: true });
-
-      // Subtitles are sourced from the sibling transcript.json. If subtitles are
-      // disabled in settings OR the transcript file is missing, we render without
-      // subtitles (the M7 behaviour). Read errors are non-fatal — render proceeds.
-      let transcriptWords: Word[] | undefined;
-      if (settings.subtitles.enabled) {
+      renderInFlight = true;
+      const fileLabel = basename(audioPath);
+      try {
+        const highlightsPath = `${audioPath}.highlights.json`;
+        let raw: string;
         try {
-          const transcriptRaw = await fsPromises.readFile(`${audioPath}.transcript.json`, 'utf8');
-          const transcript = TranscriptSchema.parse(JSON.parse(transcriptRaw));
-          transcriptWords = transcript.words;
-        } catch {
-          // No transcript or unreadable — silently render without subtitles.
-          transcriptWords = undefined;
+          raw = await fsPromises.readFile(highlightsPath, 'utf8');
+        } catch (e: unknown) {
+          const code = (e as NodeJS.ErrnoException).code;
+          if (code === 'ENOENT') {
+            throw new Error(`No highlights found at ${highlightsPath}`);
+          }
+          throw e;
         }
-      }
+        const highlightSet = HighlightSetSchema.parse(JSON.parse(raw));
 
-      const service = getRenderService();
-      const renderResult = await service.render({
-        sourcePath: audioPath,
-        outputDir,
-        highlights: highlightSet.highlights,
-        transcriptWords,
-        subtitleOptions:
-          settings.subtitles.enabled && transcriptWords
-            ? {
-                fontFamily: settings.subtitles.fontFamily,
-                fontSize: settings.subtitles.fontSize,
-                fillColor: settings.subtitles.fillColor,
-                outlineColor: settings.subtitles.outlineColor,
-                position: settings.subtitles.position,
-                titleFontSize: settings.subtitles.titleFontSize,
-                titleFontWeight: settings.subtitles.titleFontWeight,
-              }
-            : undefined,
-      });
+        const settings = settingsStore.get();
+        const sourceStem = basename(audioPath, extname(audioPath));
+        const outputDir = join(settings.paths.outputs, sourceStem);
+        await fsPromises.mkdir(outputDir, { recursive: true });
 
-      // M9: persist to history. Best-effort — render result is returned even if
-      // persistence fails (avoids losing the user's render to a DB error).
-      try {
-        const metaPath = `${audioPath}.meta.json`;
-        const metaRaw = await fsPromises.readFile(metaPath, 'utf8');
-        const meta = VideoMetaSchema.parse(JSON.parse(metaRaw));
-        await getHistoryService().recordJob({
-          meta,
+        // Subtitles are sourced from the sibling transcript.json. If subtitles are
+        // disabled in settings OR the transcript file is missing, we render without
+        // subtitles (the M7 behaviour). Read errors are non-fatal — render proceeds.
+        let transcriptWords: Word[] | undefined;
+        if (settings.subtitles.enabled) {
+          try {
+            const transcriptRaw = await fsPromises.readFile(`${audioPath}.transcript.json`, 'utf8');
+            const transcript = TranscriptSchema.parse(JSON.parse(transcriptRaw));
+            transcriptWords = transcript.words;
+          } catch {
+            // No transcript or unreadable — silently render without subtitles.
+            transcriptWords = undefined;
+          }
+        }
+
+        await ensureVideoEncoderArgs();
+        const service = getRenderService();
+        const renderResult = await service.render({
           sourcePath: audioPath,
-          highlightSet,
-          renderResult,
-          whisperModel: settings.whisper.model,
+          outputDir,
+          highlights: highlightSet.highlights,
+          transcriptWords,
+          subtitleOptions:
+            settings.subtitles.enabled && transcriptWords
+              ? {
+                  fontFamily: settings.subtitles.fontFamily,
+                  fontSize: settings.subtitles.fontSize,
+                  fillColor: settings.subtitles.fillColor,
+                  outlineColor: settings.subtitles.outlineColor,
+                  position: settings.subtitles.position,
+                  titleFontSize: settings.subtitles.titleFontSize,
+                  titleFontWeight: settings.subtitles.titleFontWeight,
+                }
+              : undefined,
         });
-      } catch (e) {
-        process.stderr.write(`[m9] failed to record history: ${(e as Error).message}\n`);
-      }
 
-      const okCount = renderResult.results.filter((r) => r.status === 'done').length;
-      const failed = renderResult.results.length - okCount;
-      const body = failed === 0 ? `${fileLabel} · ${okCount}개` : `${fileLabel} · ${okCount}개 완료, ${failed}개 실패/취소`;
-      notifyStageComplete('렌더링 완료', body);
-      return renderResult;
-    } catch (e) {
-      notifyStageComplete('렌더링 실패', `${fileLabel}: ${(e as Error).message}`);
-      throw e;
-    } finally {
-      renderInFlight = false;
-    }
-  }));
+        // M9: persist to history. Best-effort — render result is returned even if
+        // persistence fails (avoids losing the user's render to a DB error).
+        try {
+          const metaPath = `${audioPath}.meta.json`;
+          const metaRaw = await fsPromises.readFile(metaPath, 'utf8');
+          const meta = VideoMetaSchema.parse(JSON.parse(metaRaw));
+          await getHistoryService().recordJob({
+            meta,
+            sourcePath: audioPath,
+            highlightSet,
+            renderResult,
+            whisperModel: settings.whisper.model,
+          });
+        } catch (e) {
+          process.stderr.write(`[m9] failed to record history: ${(e as Error).message}\n`);
+        }
+
+        const okCount = renderResult.results.filter((r) => r.status === 'done').length;
+        const failed = renderResult.results.length - okCount;
+        const body =
+          failed === 0 ? `${fileLabel} · ${okCount}개` : `${fileLabel} · ${okCount}개 완료, ${failed}개 실패/취소`;
+        notifyStageComplete('렌더링 완료', body);
+        return renderResult;
+      } catch (e) {
+        notifyStageComplete('렌더링 실패', `${fileLabel}: ${(e as Error).message}`);
+        throw e;
+      } finally {
+        renderInFlight = false;
+      }
+    }),
+  );
 
   ipcMain.handle('render:cancel', () => {
     renderService?.cancel();
@@ -697,7 +776,14 @@ void app.whenReady().then(() => {
   });
 
   ipcMain.handle('setup:status', () => getSetupWizard().status());
-  ipcMain.handle('setup:run', () => getSetupWizard().run());
+  ipcMain.handle('setup:run', async () => {
+    // Resolve the llama wheel plan (NVIDIA probe) and rebuild the wizard so
+    // the EXPERIMENTAL CUDA path is honored even if setup:status already
+    // constructed a CPU-default wizard earlier.
+    await ensureLlamaWheelPlan();
+    setupWizard = null;
+    return getSetupWizard().run();
+  });
 
   createMainWindow();
 

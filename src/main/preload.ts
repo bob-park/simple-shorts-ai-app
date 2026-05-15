@@ -88,6 +88,7 @@ const api: AppApi = {
 
   revealInFolder: (absolutePath: string) => ipcRenderer.invoke('shell:reveal', absolutePath),
   openPath: (absolutePath: string) => ipcRenderer.invoke('shell:openPath', absolutePath),
+  openLogsFolder: () => ipcRenderer.invoke('logs:openFolder'),
 };
 
 contextBridge.exposeInMainWorld('api', api);

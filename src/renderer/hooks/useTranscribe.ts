@@ -6,6 +6,7 @@ import type { Transcript } from '@shared/transcript';
 export type TranscribeState =
   | { status: 'idle' }
   | { status: 'starting'; audioPath: string }
+  | { status: 'downloading-model'; audioPath: string; progress: TranscribeProgress }
   | { status: 'transcribing'; audioPath: string; progress: TranscribeProgress }
   | { status: 'done'; audioPath: string; transcriptPath: string; transcript: Transcript }
   | { status: 'canceled'; audioPath: string }
@@ -26,10 +27,18 @@ export function useTranscribe(): UseTranscribe {
   useEffect(() => {
     const unsubscribe = window.api.onTranscribeProgress((p) => {
       setState((current) => {
-        if (current.status === 'starting' || current.status === 'transcribing') {
-          return { status: 'transcribing', audioPath: current.audioPath, progress: p };
+        if (
+          current.status !== 'starting' &&
+          current.status !== 'downloading-model' &&
+          current.status !== 'transcribing'
+        ) {
+          return current;
         }
-        return current;
+        const { audioPath } = current;
+        if (p.phase === 'model-download') {
+          return { status: 'downloading-model', audioPath, progress: p };
+        }
+        return { status: 'transcribing', audioPath, progress: p };
       });
     });
     return unsubscribe;
