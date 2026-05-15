@@ -1,9 +1,39 @@
 # Windows STT Fix — Diagnostic Layer + Targeted Runtime Repair
 
-**Status:** Spec, awaiting plan
+**Status:** RESOLVED — Phase 1 (diagnostic layer) shipped; Phase 2 capture done via that layer + a systematic-debugging session; Phase 3 (3a/3b/3c) **superseded** by evidence. See **Resolution** below. The original "Problem" / Phase-3 analysis is kept verbatim as the historical record the diagnostic-first bet was made against.
 **Date:** 2026-05-15
 **Author:** Bob Park (with Claude)
 **Scope:** Make STT (transcribe) work on packaged Windows. Add a permanent diagnostic layer (sidecar log file + setup self-test) so the real failure is captured instead of guessed, then apply the targeted runtime fix the captured exception points to. macOS behavior unchanged.
+
+---
+
+## Resolution (2026-05-15, post-investigation)
+
+**The diagnostic-first bet paid off.** Phase 1 shipped, and the evidence it produced **disproved all three Phase-3 hypotheses** and revealed two *different* root causes. The spec's central thesis — "root-cause uncertainty is the actual blocker; stop guessing; build diagnostics first" — was vindicated.
+
+### What shipped (Phase 1, branch `fix-win-stt-diagnostics`, TDD + subagent review)
+
+`SidecarLogger` (`0052b1d`) · PythonSidecar `logSink` tee (`0c0837b`) · `SetupWizardService.selfTest()` + sentinel-gated `status()` (`7968e93`) · main.ts wiring + `logs:openFolder` + failed-handler logging (`322e876`) · Settings "로그 폴더 열기" (`eb0c6f9`). Unchanged on macOS; full suite green.
+
+### Phase 2 — how the real error was actually captured
+
+Not via the manual console procedure below. The shipped layer did it: the **setup self-test passed on the user's Windows machine** (so `import faster_whisper, ctranslate2, av` works there) and `sidecar.log` (Settings → 로그 폴더 열기) carried the real evidence, interpreted in a `/superpowers:systematic-debugging` session.
+
+### The two real root causes (evidence-backed) and the fixes applied
+
+**Problem A — macOS `setup:run` fails (`uv exited 1`, `deflate decompression error: invalid block type`).** The abetlen-prebuilt CPU `py3-none-macosx_11_0_arm64` wheels for `llama-cpp-python` 0.3.21/0.3.22/0.3.23 are **corrupt at the source** — they download byte-exact to GitHub's recorded asset size yet fail spec-compliant zip/deflate extraction (confirmed with Python `zipfile`; the `0.3.19` cp311 mac wheel and the `0.3.23` win_amd64 wheel are valid). `requirements.txt` floated `>=0.3.22`, so uv selected the corrupt newest wheel from the abetlen index. **Fix:** pin `llama-cpp-python==0.3.19` — the newest version with valid abetlen wheels for **both** macosx_11_0_arm64 and win_amd64 (cp311); its bundled `libllama` confirms full Gemma 3 support (the app loads `gemma-3-4b-it`). Commit `3d24fba`; regression guard `src/main/services/sidecarRequirements.test.ts`. Not a Phase-1 regression — an upstream artifact defect exposed by the dependency float.
+
+**Problem B — Windows STT "아무 작업도 안 함" (does nothing).** **Not** a Windows STT/runtime bug. The self-test passing already disproved 3a (ctranslate2 imports fine on Windows); `sidecar.log` showed the Whisper model downloaded and **ctranslate2 loaded on CPU**. The defect: the renderer `starting` state — which spans sidecar boot + first-run Whisper model **download** (hundreds of MB to several GB) + ctranslate2 load — rendered one static line claiming "(최초 1회 수십 초 소요)" with no liveness indicator. The download takes minutes; the user waited the promised seconds, judged it hung, and killed the app — the log shows a *working* transcribe aborted by the resulting `sidecar shutting down`. **Fix:** the `starting` card now states the first run downloads the model and can take several minutes (don't close the window) and shows an indeterminate progressbar. Commit `ea6a3b0`; regression guard `tests/renderer/TranscribeCard.test.tsx`.
+
+### Phase 3 — SUPERSEDED (not implemented)
+
+The captured evidence disproved every branch:
+
+- **3a (ctranslate2 MSVC++ runtime DLL bundling)** — DISPROVEN. The setup self-test (`import ctranslate2`) **passed** on the user's Windows machine. No DLL is missing; the entire `vcredist` work (plan Tasks 7→8) is obsolete and was **not** implemented.
+- **3b (HF cache / symlink hardening)** — the HF symlink line is a **benign warning** (degraded caching still works), not the failure. Not implemented. (`HF_HUB_DISABLE_SYMLINKS_WARNING=1` would only silence cosmetic noise — optional, out of scope.)
+- **3c (device clamp / PyAV path)** — not the issue; ctranslate2 loaded on CPU fine. Not implemented.
+
+The Phase 3 section below is retained **only as the historical hypothesis space**, not as work to do.
 
 ---
 
@@ -119,6 +149,8 @@ Read the full `transcribe_failed` traceback printed back as the JSON-RPC error. 
 - PyAV / `av` / file-open / decode error on `audio_path` → **Phase 3c** (PyAV part)
 
 ### Phase 3 — Targeted fix
+
+> **⚠️ SUPERSEDED — historical hypothesis space only. Do not implement.** The shipped Phase-1 diagnostics disproved all three branches (see **Resolution** at the top of this doc). The real fixes were Problem A (pin `llama-cpp-python==0.3.19`, `3d24fba`) and Problem B (honest first-run model-prep UI, `ea6a3b0`).
 
 #### 3a. ctranslate2 runtime DLL missing (primary)
 

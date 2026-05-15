@@ -1,6 +1,8 @@
 # Windows STT Fix — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **⚠️ STATUS (2026-05-15): Phase 1 DONE & merged. Phase 2 done differently (via the shipped diagnostics + a systematic-debugging session). Phase 3 (Tasks 7–10) SUPERSEDED — disproven by evidence, do NOT execute. Phase 4 (Task 11) still valid.** See **Resolution** below for the two real root causes and the fixes actually applied. Task bodies are kept as the historical hypothesis space.
+
+> **For agentic workers:** Phases 1–3 are complete/superseded — do not re-execute them. Only Phase 4 (Task 11, docs) and the Resolution's follow-ups remain. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make STT work on packaged Windows by first capturing the real `transcribe_failed` exception (via a permanent sidecar log + setup self-test), then applying the targeted runtime fix it points to.
 
@@ -18,7 +20,27 @@
 
 ---
 
-## Phase 1 — Diagnostic Infrastructure (unconditional, lands first)
+## Resolution (2026-05-15)
+
+**Phase 1 (Tasks 1–6) — DONE**, branch `fix-win-stt-diagnostics`, TDD + subagent-driven review: `SidecarLogger` `0052b1d`, PythonSidecar `logSink` `0c0837b`, `SetupWizardService.selfTest()` `7968e93`, main.ts/IPC wiring `322e876`, Settings affordance `eb0c6f9`. Full suite green, macOS unchanged.
+
+**Phase 2 (Task 7) — done differently.** The capture happened through the shipped diagnostics, not the manual console procedure: the setup self-test **passed** on the user's Windows machine and `sidecar.log` carried the real evidence, read in a `/superpowers:systematic-debugging` session.
+
+**Phase 3 (Tasks 8/9/10) — SUPERSEDED, not implemented.** Evidence disproved all branches:
+- Task 8 / 3a (ctranslate2 MSVC++ vcredist bundling): the self-test (`import ctranslate2`) **passed** on Windows → no missing DLL. Obsolete.
+- Task 9 / 3b (HF cache): the HF symlink line is a benign warning, not the failure. Not needed.
+- Task 10 / 3c (device/PyAV): ctranslate2 loaded on CPU fine. Not the issue.
+
+**Two real root causes were found and fixed instead (TDD, same branch):**
+
+- **Problem A — macOS `setup:run` fails.** abetlen prebuilt CPU `py3-none-macosx_11_0_arm64` wheels for `llama-cpp-python` 0.3.21–0.3.23 are corrupt at the source (byte-exact download, fails zip/deflate extraction; 0.3.19 cp311 mac + 0.3.23 win wheels are valid). The `>=0.3.22` float selected the corrupt newest wheel. **Fix `3d24fba`:** pin `llama-cpp-python==0.3.19` (newest with valid wheels for mac-arm64 **and** win cp311; Gemma-3-capable). Guard: `src/main/services/sidecarRequirements.test.ts`.
+- **Problem B — Windows STT "does nothing".** Not an STT bug (self-test passed; model downloaded; ctranslate2 loaded on CPU). The `starting` UI state — spanning sidecar boot + first-run multi-minute model **download** + load — showed a static "(최초 1회 수십 초 소요)" line with no liveness; the user judged it hung and killed the app, aborting a working transcribe (`sidecar shutting down`). **Fix `ea6a3b0`:** honest first-run model-prep copy (download, several minutes, don't close the window) + indeterminate progressbar. Guard: `tests/renderer/TranscribeCard.test.tsx`.
+
+**Remaining valid follow-up:** Phase 4 / Task 11 — update `docs/build-windows.md` triage to reflect the real causes (the pin + the model-download UX), **not** the obsolete "classifier probe → 3a/3b/3c" flow.
+
+---
+
+## Phase 1 — Diagnostic Infrastructure (unconditional, lands first) — ✅ DONE (see Resolution)
 
 ### Task 1: `SidecarLogger` infra module
 
@@ -644,7 +666,9 @@ Expected: all PASS. Phase 1 (permanent diagnostics) is complete and committed. *
 
 ---
 
-## Phase 2 — Capture the Real Exception (manual, on the Windows VM)
+## Phase 2 — Capture the Real Exception (manual, on the Windows VM) — ⚠️ SUPERSEDED
+
+> Done differently — see **Resolution**. The shipped self-test + `sidecar.log` captured the evidence; the manual console procedure below was not needed. Kept as a fallback technique only.
 
 ### Task 7: Build the Windows installer, capture the classifier + traceback
 
@@ -702,7 +726,9 @@ Write the captured exception + chosen branch into the plan's checklist (a commen
 
 ---
 
-## Phase 3 — Targeted Fix (run EXACTLY ONE of Task 8 / 9 / 10, chosen by Task 7)
+## Phase 3 — Targeted Fix (run EXACTLY ONE of Task 8 / 9 / 10, chosen by Task 7) — ⚠️ SUPERSEDED, DO NOT EXECUTE
+
+> All three branches were disproven by evidence (see **Resolution**). The real fixes were Problem A (`3d24fba`, pin `llama-cpp-python==0.3.19`) and Problem B (`ea6a3b0`, honest first-run model-prep UI). Tasks 8/9/10 below are retained only as the historical hypothesis space.
 
 ### Task 8: (3a — primary) Bundle the MSVC++ runtime DLLs for the sidecar
 
@@ -1039,19 +1065,19 @@ In `docs/build-windows.md`, in the "Verifying" numbered list, replace item 4 ("L
 
 Renumber the subsequent items (the old 4→6 render check, 5→7 uninstall).
 
-- [ ] **Step 2: Add a "Diagnosing STT failures" subsection**
+- [ ] **Step 2: Add a "Diagnosing STT failures" subsection** *(content corrected post-investigation — the old "import ctranslate2 → vcredist / 3a/3b/3c" matrix was disproven; use the real triage below)*
 
 Append before "## Known limitations":
 
 ```markdown
 ## Diagnosing STT failures
 
-`transcribe_failed: <PythonException>` means the sidecar booted but faster-whisper raised. Classify before fixing (do not guess):
+The shipped diagnostics make this concrete (do not guess):
 
-1. `"%APPDATA%\Shorts AI\sidecar-venv\Scripts\python.exe" -c "import ctranslate2"` — `DLL load failed` → missing MSVC++ runtime (the bundled `resources\vcredist` should prevent this; verify it shipped).
-2. Otherwise read `%APPDATA%\Shorts AI\logs\sidecar.log` for the full traceback — HF cache vs PyAV vs device.
+1. **macOS setup fails — `uv exited 1 … deflate decompression error: invalid block type`.** An upstream abetlen `llama-cpp-python` CPU wheel is corrupt. We pin `llama-cpp-python==0.3.19` (last version with valid abetlen wheels for mac-arm64 + win, Gemma-3-capable; guarded by `sidecarRequirements.test.ts`). If it recurs: confirm the pin shipped; verify the pinned version's abetlen mac-arm64/win wheels still extract (download via the GitHub-releases href, `python -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).testzip()"`); re-pin to another version whose wheels are valid on both platforms; clear a stale `~/.cache/uv` if a corrupt wheel was cached before the pin.
+2. **Windows STT "seems to do nothing".** Expected on first run: the Whisper model download (hundreds of MB to several GB) + load takes minutes and is now shown by the "전사 준비 중…" card with a liveness bar — wait it out, do not close the window. A *real* failure surfaces as a `자막 추출 실패` notification and a full traceback in `%APPDATA%\Shorts AI\logs\sidecar.log` (Settings → 진단 로그 → 로그 폴더 열기). `sidecar shutting down` in the log = the app/window was closed mid-transcribe, not an STT error. The setup self-test already gates `import faster_whisper, ctranslate2, av` at install time.
 
-See `docs/superpowers/specs/2026-05-15-windows-stt-fix-design.md` for the full root-cause matrix.
+See the **Resolution** in `docs/superpowers/specs/2026-05-15-windows-stt-fix-design.md` for the evidenced root causes.
 ```
 
 - [ ] **Step 3: Commit**
