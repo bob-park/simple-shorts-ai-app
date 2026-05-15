@@ -34,6 +34,15 @@ export function PathsSection({
           dialogTitle="출력 폴더 선택"
         />
       </SettingsRow>
+      <SettingsRow label="진단 로그" hint="STT/사이드카 오류 진단용 로그 파일 위치입니다. 문제 보고 시 첨부하세요.">
+        <button
+          type="button"
+          onClick={() => void window.api.openLogsFolder()}
+          className="border-ink px-xl text-button-md text-ink h-10 self-start rounded-full border bg-transparent font-semibold"
+        >
+          로그 폴더 열기
+        </button>
+      </SettingsRow>
     </SettingsCard>
   );
 }
