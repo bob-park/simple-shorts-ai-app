@@ -55,6 +55,7 @@ beforeAll(() => {
     cancelRender: vi.fn(async () => undefined),
     onRenderProgress: vi.fn(() => () => undefined),
     openPath: vi.fn(async () => undefined),
+    openLogsFolder: vi.fn(async () => undefined),
     historyList: vi.fn(async () => []),
     historyGetDetail: vi.fn(async () => null),
     historyDelete: vi.fn(async () => undefined),
