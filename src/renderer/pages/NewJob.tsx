@@ -109,6 +109,9 @@ export function NewJobPage() {
             />
           ) : null}
           {transcribe.state.status === 'starting' ? <TranscribeCard status="starting" /> : null}
+          {transcribe.state.status === 'downloading-model' ? (
+            <TranscribeCard status="downloading-model" progress={transcribe.state.progress} />
+          ) : null}
           {transcribe.state.status === 'transcribing' ? (
             <TranscribeCard
               status="transcribing"

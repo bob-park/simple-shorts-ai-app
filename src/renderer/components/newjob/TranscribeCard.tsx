@@ -7,9 +7,14 @@ function formatPercent(p: Progress): string {
   return `${pct.toFixed(1)}%`;
 }
 
+function formatMB(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
 type Props =
   | { status: 'idle'; onStart: () => void }
   | { status: 'starting' }
+  | { status: 'downloading-model'; progress: Progress }
   | { status: 'transcribing'; progress: Progress; onCancel: () => void }
   | {
       status: 'done';
@@ -49,6 +54,29 @@ export function TranscribeCard(props: Props) {
           </p>
           <div role="progressbar" aria-label="모델 준비 중" className="bg-surface h-2 overflow-hidden rounded-full">
             <div className="bg-primary h-full w-1/3 animate-pulse rounded-full" />
+          </div>
+        </div>
+      ) : null}
+
+      {props.status === 'downloading-model' ? (
+        <div className="gap-md flex flex-col">
+          <h3 className="text-card-title text-ink font-semibold">
+            Whisper 모델 다운로드 중 {formatPercent(props.progress)}
+          </h3>
+          <p className="text-body-sm text-slate">
+            처음 한 번만 받습니다 ({formatMB(props.progress.processed)} /{' '}
+            {props.progress.total > 0 ? formatMB(props.progress.total) : '…'}). 완료될 때까지 창을 닫지 마세요.
+          </p>
+          <div role="progressbar" aria-label="모델 다운로드" className="bg-surface h-2 overflow-hidden rounded-full">
+            <div
+              className="bg-primary h-full rounded-full transition-[width]"
+              style={{
+                width:
+                  props.progress.total > 0
+                    ? `${Math.min(100, (props.progress.processed / props.progress.total) * 100)}%`
+                    : '0%',
+              }}
+            />
           </div>
         </div>
       ) : null}

@@ -28,3 +28,31 @@ describe('TranscribeCard starting state', () => {
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
   });
 });
+
+/**
+ * The coarse pulse was empirically insufficient (users still couldn't tell
+ * "downloading" from "hung" over a multi-minute download and killed the app).
+ * The `downloading-model` state shows REAL byte progress: a determinate bar
+ * with %/MB so a long download is unmistakably advancing.
+ */
+describe('TranscribeCard downloading-model state', () => {
+  const progress = {
+    jobId: 'j',
+    phase: 'model-download' as const,
+    processed: 50 * 1024 * 1024,
+    total: 100 * 1024 * 1024,
+  };
+
+  it('shows determinate percent and MB so the download is visibly advancing', () => {
+    render(<TranscribeCard status="downloading-model" progress={progress} />);
+    expect(screen.getByText(/50\.0%/)).toBeInTheDocument();
+    expect(screen.getByText(/50\.0MB \/ 100\.0MB/)).toBeInTheDocument();
+  });
+
+  it('renders a determinate progressbar whose width tracks bytes (~50%)', () => {
+    render(<TranscribeCard status="downloading-model" progress={progress} />);
+    const bars = screen.getAllByRole('progressbar');
+    const fill = bars[bars.length - 1].firstElementChild as HTMLElement;
+    expect(fill.style.width).toBe('50%');
+  });
+});
